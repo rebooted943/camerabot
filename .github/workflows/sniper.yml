@@ -1,0 +1,73 @@
+name: ArbitrageSniper
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub may delay scheduled runs under heavy load.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Send a Telegram ping and exit (no scraping)"
+        type: boolean
+        default: false
+
+# Allow the job to push the updated SQLite DB back to the repo.
+permissions:
+  contents: write
+
+# Never run two scans at once (they would race on seen_ads.db).
+concurrency:
+  group: arbitrage-sniper
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      EBAY_APP_TOKEN: ${{ secrets.EBAY_APP_TOKEN }}
+      HEADLESS: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run ArbitrageSniper
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python main.py --dry-run
+          else
+            python main.py --summary
+          fi
+
+      - name: Commit updated database
+        if: ${{ always() && github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain seen_ads.db)" ]; then
+            git add seen_ads.db
+            git commit -m "chore(state): update seen_ads.db [skip ci]"
+            # Rebase-pull to avoid clobbering concurrent commits, then push with retries.
+            for i in 1 2 3 4; do
+              git pull --rebase --autostash origin ${{ github.ref_name }} && \
+              git push origin HEAD:${{ github.ref_name }} && break || sleep $((2**i))
+            done
+          else
+            echo "No DB changes to commit."
+          fi

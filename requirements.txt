@@ -1,0 +1,15 @@
+# ArbitrageSniper dependencies
+
+# Async browser automation + anti-bot evasion
+playwright==1.44.0
+playwright-stealth==1.0.6
+
+# HTTP fallback for API-based sources (eBay Browse API, Telegram, etc.)
+httpx==0.27.0
+
+# HTML parsing for lightweight (non-JS) scraping paths
+selectolax==0.3.21
+
+# Config / models / utils
+python-dotenv==1.0.1
+tenacity==8.3.0

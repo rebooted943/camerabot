@@ -1,0 +1,37 @@
+{
+  "_comment": "Bridge config. Each target defines the search queries used on buy-side providers and the keys/overrides used to fetch MPB/eBay/F64 benchmarks. 'mpb_id' is an MPB product slug or full URL; 'mpb_floor' (EUR) is an optional manual override/fallback used when MPB scraping fails. All benchmark prices are treated as EUR.",
+  "targets": [
+    {
+      "label": "Sony A7 III (body)",
+      "queries": ["Sony A7 III", "Sony A7III", "Sony Alpha 7 III"],
+      "mpb_id": "sony-a7-iii",
+      "mpb_floor": 720,
+      "ebay_query": "Sony A7 III Gehäuse body",
+      "f64_query": "Sony A7 III"
+    },
+    {
+      "label": "Canon EOS R6 (body)",
+      "queries": ["Canon EOS R6", "Canon R6"],
+      "mpb_id": "canon-eos-r6",
+      "mpb_floor": 950,
+      "ebay_query": "Canon EOS R6 body Gehäuse",
+      "f64_query": "Canon EOS R6"
+    },
+    {
+      "label": "Fujifilm X-T4 (body)",
+      "queries": ["Fujifilm X-T4", "Fuji XT4"],
+      "mpb_id": "fujifilm-x-t4",
+      "mpb_floor": 620,
+      "ebay_query": "Fujifilm X-T4 body",
+      "f64_query": "Fujifilm X-T4"
+    },
+    {
+      "label": "Sigma 24-70 f2.8 DG DN Art (Sony E)",
+      "queries": ["Sigma 24-70 2.8 DG DN", "Sigma 24-70 Art Sony"],
+      "mpb_id": "sigma-24-70mm-f2-8-dg-dn-art-sony-fit",
+      "mpb_floor": 520,
+      "ebay_query": "Sigma 24-70 2.8 DG DN Art Sony E",
+      "f64_query": "Sigma 24-70 DG DN Sony"
+    }
+  ]
+}
