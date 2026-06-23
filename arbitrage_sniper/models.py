@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 
 class Condition(str, Enum):
@@ -81,9 +82,25 @@ class Item:
             self.id = self.fingerprint()
 
     def fingerprint(self) -> str:
-        """Stable hash used when a platform does not expose a clean id."""
-        raw = f"{self.platform}|{self.link}|{self.title}".lower()
+        """Stable hash used when a platform does not expose a clean id.
+
+        Built from the *canonical* link (query/fragment stripped) so the same
+        ad always maps to the same key across runs even if tracking params or
+        the price-in-title change. Falls back to the title when there is no link.
+        """
+        clean_link = self._canonical_link()
+        basis = clean_link or self.title
+        raw = f"{self.platform}|{basis}".lower()
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+    def _canonical_link(self) -> str:
+        if not self.link:
+            return ""
+        try:
+            parts = urlsplit(self.link)
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+        except Exception:
+            return self.link
 
     @property
     def unique_key(self) -> str:

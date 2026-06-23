@@ -1,36 +1,48 @@
 #!/usr/bin/env python3
 """ArbitrageSniper entrypoint.
 
-Pipeline per scheduled run:
-    1. Load targets from thresholds.json.
-    2. For each target: scrape every buy-side provider (OLX, Vinted, ...).
-    3. Drop ads already in seen_ads.db (de-dup) and normalise prices to EUR.
-    4. Fetch MPB (floor), eBay-sold + F64 (retail) benchmarks (cached per target).
-    5. Trigger rule: buy_price <= mpb_price * MPB_MARGIN  -> build Alert.
-    6. Notify via Telegram and record everything in SQLite.
+Modes:
+    python main.py                # scheduled scan of all tracked targets
+    python main.py --summary      # ... and post a run summary to Telegram
+    python main.py --dry-run      # send a Telegram ping and exit
+    python main.py --listen       # process Telegram commands (/scan, /add, ...)
+    python main.py --query "..."  # one-off scan for a single query
 
-Designed to be run headless from GitHub Actions every 10-15 minutes; the DB is
-committed back to the repo by the workflow to persist de-dup state.
+Pipeline per target:
+    1. Scrape every buy-side provider (OLX, Vinted, Publi24, Wallapop).
+    2. Keep only listings whose title actually matches the target (relevance
+       filter: drops grips/batteries/wrong models).
+    3. Drop ads already in seen_ads.db and normalise prices to EUR.
+    4. Fetch MPB (floor), eBay-sold + F64 (retail) benchmarks (relevance-aware).
+    5. Trigger: buy <= mpb * MPB_MARGIN AND gain <= MAX_GAIN_PCT -> alert.
+    6. Notify via Telegram and record everything in SQLite (committed by CI).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
 from dataclasses import dataclass, field
 
-from arbitrage_sniper import arbitrage
+from arbitrage_sniper import arbitrage, commands as cmd
 from arbitrage_sniper.benchmarks import EbayBenchmark, F64Benchmark, MpbBenchmark
 from arbitrage_sniper.browser import BrowserManager
-from arbitrage_sniper.config import THRESHOLDS_PATH, settings
+from arbitrage_sniper.config import settings
 from arbitrage_sniper.currency import to_eur
 from arbitrage_sniper.database import Database
-from arbitrage_sniper.models import Item
+from arbitrage_sniper.matching import is_relevant
+from arbitrage_sniper.models import Alert, Item
 from arbitrage_sniper.notifier import TelegramNotifier
 from arbitrage_sniper.providers import ALL_PROVIDERS
+from arbitrage_sniper.targets import (
+    Target,
+    add_target,
+    list_labels,
+    load_targets,
+    remove_target,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,42 +53,18 @@ logger = logging.getLogger("arbitrage_sniper.main")
 
 
 @dataclass
-class Target:
-    label: str
-    queries: list[str]
-    mpb_id: str | None = None
-    mpb_floor: float | None = None
-    ebay_query: str | None = None
-    f64_query: str | None = None
-    extra: dict = field(default_factory=dict)
-
-    @property
-    def primary_query(self) -> str:
-        return self.queries[0] if self.queries else self.label
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Target":
-        return cls(
-            label=d["label"],
-            queries=d.get("queries") or [d["label"]],
-            mpb_id=d.get("mpb_id"),
-            mpb_floor=d.get("mpb_floor"),
-            ebay_query=d.get("ebay_query"),
-            f64_query=d.get("f64_query"),
-            extra={k: v for k, v in d.items() if k not in {
-                "label", "queries", "mpb_id", "mpb_floor", "ebay_query", "f64_query"
-            }},
-        )
-
-
-def load_targets(path=THRESHOLDS_PATH) -> list[Target]:
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    return [Target.from_dict(t) for t in data.get("targets", [])]
+class ScanResult:
+    target: Target
+    scanned: int = 0
+    new_ads: int = 0
+    alerts: list[Alert] = field(default_factory=list)
+    cheapest: list[Item] = field(default_factory=list)
+    mpb: float | None = None
+    ebay: float | None = None
+    f64: float | None = None
 
 
 def normalise_to_eur(item: Item) -> Item:
-    """Convert an item's price to EUR in-place and return it."""
     if item.currency and item.currency.upper() != "EUR":
         item.price = to_eur(item.price, item.currency)
         item.currency = "EUR"
@@ -93,113 +81,262 @@ class Sniper:
         self.notifier = TelegramNotifier()
 
     async def collect_items(self, target: Target) -> list[Item]:
+        include = target.effective_include
+        exclude = target.exclude_terms
         items: list[Item] = []
         seen_keys: set[str] = set()
         for provider in self.providers:
             for query in target.queries:
-                results = await provider.safe_search(query)
-                for it in results:
+                for it in await provider.safe_search(query):
                     if it.unique_key in seen_keys:
+                        continue
+                    # Relevance filter: skip accessories / wrong models.
+                    if not is_relevant(it.title, include, exclude):
+                        logger.debug("[%s] drop (irrelevant): %s", provider.name, it.title)
                         continue
                     seen_keys.add(it.unique_key)
                     items.append(it)
         return items
 
     async def fetch_benchmarks(self, target: Target):
+        include = target.effective_include
         mpb = await self.mpb.get(
             target.primary_query, mpb_id=target.mpb_id, mpb_floor=target.mpb_floor
         )
-        ebay = await self.ebay.get(target.ebay_query or target.primary_query)
-        f64 = await self.f64.get(target.f64_query or target.primary_query)
+        ebay = await self.ebay.get(target.ebay_query or target.primary_query, include_terms=include)
+        f64 = await self.f64.get(target.f64_query or target.primary_query, include_terms=include)
         return mpb, ebay, f64
 
-    async def process_target(self, target: Target, db: Database) -> tuple[int, int, int]:
+    async def process_target(self, target: Target, db: Database, *, notify: bool = True) -> ScanResult:
         logger.info("=== target: %s ===", target.label)
-        all_items = await self.collect_items(target)
-        scanned = len(all_items)
+        result = ScanResult(target=target)
 
-        # De-dup against SQLite, then normalise prices to EUR.
+        all_items = await self.collect_items(target)
+        result.scanned = len(all_items)
+
         new_items = db.filter_new(all_items)
         for it in new_items:
             normalise_to_eur(it)
-        logger.info("%s: %d scanned, %d new", target.label, scanned, len(new_items))
+        result.new_ads = len(new_items)
+        logger.info("%s: %d relevant, %d new", target.label, result.scanned, result.new_ads)
+
+        # Cheapest relevant listings (useful for ad-hoc replies even w/o trigger).
+        result.cheapest = sorted(new_items, key=lambda i: i.price)[:3]
 
         if not new_items:
-            return scanned, 0, 0
+            return result
 
         mpb, ebay, f64 = await self.fetch_benchmarks(target)
+        result.mpb, result.ebay, result.f64 = mpb.value, ebay.value, f64.value
         logger.info(
             "%s benchmarks | mpb=%s ebay=%s f64=%s",
             target.label, mpb.value, ebay.value, f64.value,
         )
 
-        alerts = 0
         for it in new_items:
             alert = arbitrage.evaluate(
                 it, target_label=target.label, mpb=mpb, ebay=ebay, f64=f64
             )
             if alert:
-                if not settings.dry_run:
+                if notify and not settings.dry_run:
                     await self.notifier.send_alert(alert)
                 db.record_alert(alert)
-                alerts += 1
+                result.alerts.append(alert)
             else:
+                # Record even non-triggering ads so they are never re-evaluated
+                # / re-notified on subsequent runs.
                 db.record_item(it)
-        return scanned, len(new_items), alerts
+        return result
 
-    async def run(self, db: Database) -> tuple[int, int, int]:
+    async def scan_all(self, db: Database) -> tuple[int, int, int]:
         targets = load_targets()
         logger.info("loaded %d targets", len(targets))
-        total_scanned = total_new = total_alerts = 0
+        s = n = a = 0
         for target in targets:
             try:
-                s, n, a = await self.process_target(target, db)
+                r = await self.process_target(target, db)
             except Exception as exc:
                 logger.exception("target '%s' failed: %s", target.label, exc)
                 continue
-            total_scanned += s
-            total_new += n
-            total_alerts += a
-        return total_scanned, total_new, total_alerts
+            s += r.scanned
+            n += r.new_ads
+            a += len(r.alerts)
+        return s, n, a
+
+    async def scan_query(self, query: str, db: Database) -> ScanResult:
+        """One-off scan for an arbitrary query (Telegram /search)."""
+        target = Target.adhoc(query)
+        return await self.process_target(target, db)
 
 
+# --------------------------------------------------------------------------- #
+# Telegram command handling
+# --------------------------------------------------------------------------- #
+def _render_adhoc_reply(result: ScanResult) -> str:
+    t = result.target
+    lines = [f"\U0001F50D <b>Scan '{t.label}'</b>"]
+    lines.append(
+        f"scanned {result.scanned} relevant \u00b7 {result.new_ads} new \u00b7 "
+        f"{len(result.alerts)} alert(s)"
+    )
+    bench = []
+    if result.mpb:
+        bench.append(f"MPB {result.mpb:,.0f}\u20ac")
+    if result.ebay:
+        bench.append(f"eBay {result.ebay:,.0f}\u20ac")
+    if result.f64:
+        bench.append(f"F64 {result.f64:,.0f}\u20ac")
+    if bench:
+        lines.append("benchmarks: " + " \u00b7 ".join(bench))
+    if not result.alerts and result.cheapest:
+        lines.append("\nCheapest matches:")
+        for it in result.cheapest:
+            lines.append(f"\u2022 {it.price:,.0f}\u20ac \u2014 <a href=\"{it.link}\">{it.title[:60]}</a>")
+    return "\n".join(lines)
+
+
+async def collect_commands(notifier: TelegramNotifier, db: Database) -> list[cmd.Command]:
+    """Poll Telegram once, return authorized commands and advance the offset.
+
+    Runs without a browser so empty poll cycles stay cheap (the poller fires
+    every few minutes); the browser is only launched if commands are returned.
+    """
+    if not notifier.enabled:
+        logger.warning("telegram disabled; cannot listen for commands")
+        return []
+
+    offset = int(db.get_state("tg_offset", "0") or 0)
+    updates = await notifier.get_updates(offset=offset, timeout=settings.command_poll_timeout)
+
+    out: list[cmd.Command] = []
+    for upd in updates:
+        update_id = upd.get("update_id", 0)
+        db.set_state("tg_offset", str(update_id + 1))  # advance even on errors
+
+        msg = upd.get("message") or {}
+        chat = msg.get("chat") or {}
+        chat_id = str(chat.get("id", ""))
+        text = msg.get("text") or ""
+
+        if settings.telegram_chat_id and chat_id != str(settings.telegram_chat_id):
+            logger.info("ignoring message from unauthorized chat %s", chat_id)
+            continue
+        if not text.startswith("/"):
+            continue
+
+        command = cmd.parse(text)
+        logger.info("queued command: %s arg=%r", command.action, command.arg)
+        out.append(command)
+    return out
+
+
+def _needs_browser(commands: list[cmd.Command]) -> bool:
+    return any(c.action in ("scan_all", "scan_query") for c in commands)
+
+
+async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Database, sniper: "Sniper | None" = None) -> None:
+    if command.action in ("scan_all", "scan_query") and sniper is None:
+        await notifier.send_text("\u26A0\uFE0F internal error: scan requested without a browser")
+        return
+
+    if command.action == "help":
+        await notifier.send_text(cmd.HELP_TEXT)
+
+    elif command.action == "list":
+        labels = list_labels()
+        body = "\n".join(f"{i+1}. {l}" for i, l in enumerate(labels)) or "(none)"
+        await notifier.send_text(f"\U0001F4CB <b>Tracked targets</b>\n{body}")
+
+    elif command.action == "add":
+        changed, msg = add_target(command.arg)
+        await notifier.send_text(("\u2705 " if changed else "\u2139\uFE0F ") + msg)
+
+    elif command.action == "remove":
+        changed, msg = remove_target(command.arg)
+        await notifier.send_text(("\u2705 " if changed else "\u2139\uFE0F ") + msg)
+
+    elif command.action == "scan_all":
+        await notifier.send_text("\U0001F3AF Running full scan...")
+        s, n, a = await sniper.scan_all(db)
+        await notifier.send_summary(scanned=s, new_ads=n, alerts=a)
+
+    elif command.action == "scan_query":
+        if not command.arg:
+            await notifier.send_text("usage: /scan <query>")
+            return
+        await notifier.send_text(f"\U0001F50D Scanning '{command.arg}'...")
+        result = await sniper.scan_query(command.arg, db)
+        await notifier.send_text(_render_adhoc_reply(result))
+
+    else:
+        await notifier.send_text("Unknown command. Send /help.")
+
+
+# --------------------------------------------------------------------------- #
+# entrypoints
+# --------------------------------------------------------------------------- #
 async def amain(args: argparse.Namespace) -> int:
-    problems = settings.validate()
-    for p in problems:
+    for p in settings.validate():
         logger.warning("config: %s", p)
 
     if args.dry_run or settings.dry_run:
-        notifier = TelegramNotifier()
-        ok = await notifier.send_text("\u2705 ArbitrageSniper dry-run ping: bot is alive.")
+        ok = await TelegramNotifier().send_text("\u2705 ArbitrageSniper dry-run ping: bot is alive.")
         logger.info("dry-run ping sent=%s", ok)
         return 0
 
     db = Database()
     run_id = db.start_run()
     scanned = new_ads = alerts = 0
+    note = args.query or ("listen" if args.listen else "scan")
+    notifier = TelegramNotifier()
     try:
-        async with BrowserManager() as browser:
-            sniper = Sniper(browser)
-            scanned, new_ads, alerts = await sniper.run(db)
+        if args.listen:
+            # Poll first WITHOUT a browser so empty cycles are cheap.
+            pending = await collect_commands(notifier, db)
+            note = f"listen ({len(pending)} cmds)"
+            if not pending:
+                logger.info("listen: no commands")
+            elif _needs_browser(pending):
+                async with BrowserManager() as browser:
+                    sniper = Sniper(browser)
+                    for command in pending:
+                        await _safe_dispatch(command, notifier, db, sniper)
+            else:
+                for command in pending:
+                    await _safe_dispatch(command, notifier, db, None)
+        elif args.query:
+            async with BrowserManager() as browser:
+                sniper = Sniper(browser)
+                result = await sniper.scan_query(args.query, db)
+                scanned, new_ads, alerts = result.scanned, result.new_ads, len(result.alerts)
+                await notifier.send_text(_render_adhoc_reply(result))
+        else:
+            async with BrowserManager() as browser:
+                sniper = Sniper(browser)
+                scanned, new_ads, alerts = await sniper.scan_all(db)
+                if args.summary and not settings.dry_run:
+                    await notifier.send_summary(scanned=scanned, new_ads=new_ads, alerts=alerts)
     finally:
-        db.finish_run(run_id, scanned=scanned, new_ads=new_ads, alerts=alerts)
-        logger.info(
-            "run done | scanned=%d new=%d alerts=%d | stats=%s",
-            scanned, new_ads, alerts, db.stats(),
-        )
+        db.finish_run(run_id, scanned=scanned, new_ads=new_ads, alerts=alerts, note=note)
+        logger.info("run done | scanned=%d new=%d alerts=%d | %s", scanned, new_ads, alerts, db.stats())
         db.close()
-
-    if alerts and not settings.dry_run:
-        # optional heartbeat summary
-        if args.summary:
-            await TelegramNotifier().send_summary(scanned=scanned, new_ads=new_ads, alerts=alerts)
     return 0
+
+
+async def _safe_dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Database, sniper: "Sniper | None") -> None:
+    try:
+        await _dispatch(command, notifier, db, sniper)
+    except Exception as exc:
+        logger.exception("command failed: %s", exc)
+        await notifier.send_text(f"\u26A0\uFE0F command error: {exc}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="ArbitrageSniper - used-gear arbitrage scanner")
     parser.add_argument("--dry-run", action="store_true", help="send a Telegram ping and exit")
     parser.add_argument("--summary", action="store_true", help="send a run summary to Telegram")
+    parser.add_argument("--listen", action="store_true", help="process pending Telegram commands")
+    parser.add_argument("--query", metavar="Q", help="run a one-off scan for a single query")
     args = parser.parse_args()
     try:
         return asyncio.run(amain(args))

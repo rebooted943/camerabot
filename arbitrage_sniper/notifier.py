@@ -106,6 +106,26 @@ class TelegramNotifier:
     async def send_text(self, text: str) -> bool:
         return await self._send(text, disable_preview=True)
 
+    async def get_updates(self, offset: int = 0, timeout: int = 0) -> list[dict]:
+        """Poll Telegram getUpdates once. Returns the list of update objects."""
+        if not self.token:
+            return []
+        url = f"https://api.telegram.org/bot{self.token}/getUpdates"
+        params = {"timeout": timeout, "allowed_updates": '["message"]'}
+        if offset:
+            params["offset"] = offset
+        try:
+            async with http_client(timeout=timeout + 15) as client:
+                resp = await client.get(url, params=params)
+            data = resp.json()
+            if not data.get("ok"):
+                logger.error("telegram getUpdates error: %s", data)
+                return []
+            return data.get("result", [])
+        except Exception as exc:  # pragma: no cover - network
+            logger.error("telegram getUpdates failed: %s", exc)
+            return []
+
     async def send_summary(self, *, scanned: int, new_ads: int, alerts: int) -> bool:
         text = (
             "\U0001F3AF <b>ArbitrageSniper run complete</b>\n"

@@ -1,37 +1,87 @@
 {
-  "_comment": "Bridge config. Each target defines the search queries used on buy-side providers and the keys/overrides used to fetch MPB/eBay/F64 benchmarks. 'mpb_id' is an MPB product slug or full URL; 'mpb_floor' (EUR) is an optional manual override/fallback used when MPB scraping fails. All benchmark prices are treated as EUR.",
+  "_comment": "Bridge config. Each target defines: search 'queries' (buy-side), MPB 'mpb_id' (slug/URL) and optional 'mpb_floor' (EUR manual override/fallback), 'ebay_query'/'f64_query' for benchmarks, and an optional 'match' block. match.include = terms that MUST all be present in the title (use '|' for alternatives); match.exclude = extra terms that reject the listing. Global accessory excludes (grip, battery, charger, ...) are always applied. All benchmark prices are treated as EUR.",
   "targets": [
     {
       "label": "Sony A7 III (body)",
-      "queries": ["Sony A7 III", "Sony A7III", "Sony Alpha 7 III"],
+      "queries": [
+        "Sony A7 III",
+        "Sony A7III",
+        "Sony Alpha 7 III"
+      ],
       "mpb_id": "sony-a7-iii",
       "mpb_floor": 720,
-      "ebay_query": "Sony A7 III Gehäuse body",
-      "f64_query": "Sony A7 III"
+      "ebay_query": "Sony A7 III body",
+      "f64_query": "Sony A7 III",
+      "match": {
+        "include": [
+          "sony",
+          "a7 iii|a7iii|alpha 7 iii|ilce 7m3|ilce7m3"
+        ],
+        "exclude": [
+          "a7 ii|a7ii|a7 iv|a7iv|a7r|a7s"
+        ]
+      }
     },
     {
       "label": "Canon EOS R6 (body)",
-      "queries": ["Canon EOS R6", "Canon R6"],
+      "queries": [
+        "Canon EOS R6",
+        "Canon R6"
+      ],
       "mpb_id": "canon-eos-r6",
       "mpb_floor": 950,
-      "ebay_query": "Canon EOS R6 body Gehäuse",
-      "f64_query": "Canon EOS R6"
+      "ebay_query": "Canon EOS R6 body",
+      "f64_query": "Canon EOS R6",
+      "match": {
+        "include": [
+          "canon",
+          "eos r6|r6"
+        ],
+        "exclude": [
+          "r6 mark ii|r6 ii|r6ii|r5|r7|r8|r10|1300d|2000d|250d|90d|6d|5d"
+        ]
+      }
     },
     {
       "label": "Fujifilm X-T4 (body)",
-      "queries": ["Fujifilm X-T4", "Fuji XT4"],
+      "queries": [
+        "Fujifilm X-T4",
+        "Fuji XT4"
+      ],
       "mpb_id": "fujifilm-x-t4",
       "mpb_floor": 620,
       "ebay_query": "Fujifilm X-T4 body",
-      "f64_query": "Fujifilm X-T4"
+      "f64_query": "Fujifilm X-T4",
+      "match": {
+        "include": [
+          "fuji|fujifilm",
+          "x t4|xt4"
+        ],
+        "exclude": [
+          "x t5|xt5|x t3|xt3|x t30|xt30|x t40|xt40|x s10|x s20"
+        ]
+      }
     },
     {
       "label": "Sigma 24-70 f2.8 DG DN Art (Sony E)",
-      "queries": ["Sigma 24-70 2.8 DG DN", "Sigma 24-70 Art Sony"],
+      "queries": [
+        "Sigma 24-70 2.8 DG DN",
+        "Sigma 24-70 Art Sony"
+      ],
       "mpb_id": "sigma-24-70mm-f2-8-dg-dn-art-sony-fit",
       "mpb_floor": 520,
       "ebay_query": "Sigma 24-70 2.8 DG DN Art Sony E",
-      "f64_query": "Sigma 24-70 DG DN Sony"
+      "f64_query": "Sigma 24-70 DG DN Sony",
+      "match": {
+        "include": [
+          "sigma",
+          "24 70",
+          "dg dn"
+        ],
+        "exclude": [
+          "dg os hsm|ex dg|f4|100 400|150 600|14 24|24 105|28 70"
+        ]
+      }
     }
   ]
 }

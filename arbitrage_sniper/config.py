@@ -53,6 +53,9 @@ class Settings:
 
     # Trigger: buy_price <= mpb_price * mpb_margin  (default 0.90 => 10% cushion)
     mpb_margin: float = field(default_factory=lambda: _float("MPB_MARGIN", 0.90))
+    # Sanity guard: reject "too good to be true" deals (default 500%). A gain
+    # above this almost always means a scam, a mis-parsed price or a part-out.
+    max_gain_pct: float = field(default_factory=lambda: _float("MAX_GAIN_PCT", 500.0))
 
     min_delay: float = field(default_factory=lambda: _float("MIN_DELAY", 2.0))
     max_delay: float = field(default_factory=lambda: _float("MAX_DELAY", 6.0))
@@ -61,6 +64,9 @@ class Settings:
     )
 
     nav_timeout_ms: int = field(default_factory=lambda: _int("NAV_TIMEOUT_MS", 30000))
+
+    # Telegram command listener (poll getUpdates once per --listen run).
+    command_poll_timeout: int = field(default_factory=lambda: _int("COMMAND_POLL_TIMEOUT", 0))
 
     @property
     def telegram_enabled(self) -> bool:
