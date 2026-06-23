@@ -139,7 +139,11 @@ class Sniper:
             )
             if alert:
                 if notify and not settings.dry_run:
-                    await self.notifier.send_alert(alert)
+                    await self.notifier.send_alert(
+                        alert,
+                        chat_id=target.chat_id,
+                        message_thread_id=target.topic_id,
+                    )
                 db.record_alert(alert)
                 result.alerts.append(alert)
             else:
@@ -255,16 +259,34 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
         changed, msg = remove_target(command.arg)
         await notifier.send_text(("\u2705 " if changed else "\u2139\uFE0F ") + msg)
 
+    elif command.action == "clear":
+        removed = db.clear_seen(command.arg or None)
+        scope = f" matching '{command.arg}'" if command.arg else ""
+        await notifier.send_text(
+            f"\U0001F9F9 Forgot {removed} seen ad(s){scope}. "
+            "The next scan will re-check them from scratch."
+        )
+
     elif command.action == "scan_all":
-        await notifier.send_text("\U0001F3AF Running full scan...")
+        n_targets = len(list_labels())
+        await notifier.send_text(
+            f"\U0001F3AF <b>Scan started</b> \u2014 {n_targets} target(s). "
+            "Scraping providers + benchmarks, I'll report back when done\u2026"
+        )
         s, n, a = await sniper.scan_all(db)
-        await notifier.send_summary(scanned=s, new_ads=n, alerts=a)
+        await notifier.send_text(
+            f"\u2705 <b>Scan finished</b>\n"
+            f"\u2022 scanned: {s}\n\u2022 new ads: {n}\n\u2022 alerts: {a}"
+        )
 
     elif command.action == "scan_query":
         if not command.arg:
             await notifier.send_text("usage: /scan <query>")
             return
-        await notifier.send_text(f"\U0001F50D Scanning '{command.arg}'...")
+        await notifier.send_text(
+            f"\U0001F50D <b>Scan started</b> for '<b>{command.arg}</b>'\u2026 "
+            "this can take up to a minute."
+        )
         result = await sniper.scan_query(command.arg, db)
         await notifier.send_text(_render_adhoc_reply(result))
 

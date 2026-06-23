@@ -24,6 +24,11 @@ class Target:
     f64_query: str | None = None
     include_terms: list[str] = field(default_factory=list)
     exclude_terms: list[str] = field(default_factory=list)
+    # Optional Telegram routing: send this target's alerts to a specific
+    # channel/chat and (optionally) a forum topic thread.
+    channel: str | None = None
+    chat_id: str | None = None
+    topic_id: int | None = None
 
     @property
     def primary_query(self) -> str:
@@ -35,8 +40,17 @@ class Target:
         return self.include_terms or auto_include_terms(self.primary_query)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Target":
+    def from_dict(cls, d: dict, channels: dict | None = None) -> "Target":
         match = d.get("match") or {}
+        channels = channels or {}
+
+        # Resolve routing: a named channel can be referenced via "channel";
+        # explicit "chat_id"/"topic_id" on the target override the named one.
+        channel = d.get("channel")
+        route = dict(channels.get(channel, {})) if channel else {}
+        chat_id = d.get("chat_id", route.get("chat_id"))
+        topic_id = d.get("topic_id", route.get("topic_id"))
+
         return cls(
             label=d["label"],
             queries=d.get("queries") or [d["label"]],
@@ -46,6 +60,9 @@ class Target:
             f64_query=d.get("f64_query"),
             include_terms=list(match.get("include") or []),
             exclude_terms=list(match.get("exclude") or []),
+            channel=channel,
+            chat_id=str(chat_id) if chat_id is not None else None,
+            topic_id=int(topic_id) if topic_id is not None else None,
         )
 
     @classmethod
@@ -78,6 +95,12 @@ class Target:
                 d["match"]["include"] = self.include_terms
             if self.exclude_terms:
                 d["match"]["exclude"] = self.exclude_terms
+        if self.channel:
+            d["channel"] = self.channel
+        if self.chat_id and not self.channel:
+            d["chat_id"] = self.chat_id
+        if self.topic_id is not None and not self.channel:
+            d["topic_id"] = self.topic_id
         return d
 
 
@@ -94,7 +117,8 @@ def _save_raw(data: dict, path: Path | str = THRESHOLDS_PATH) -> None:
 
 def load_targets(path: Path | str = THRESHOLDS_PATH) -> list[Target]:
     data = _load_raw(path)
-    return [Target.from_dict(t) for t in data.get("targets", [])]
+    channels = data.get("channels") or {}
+    return [Target.from_dict(t, channels) for t in data.get("targets", [])]
 
 
 def list_labels(path: Path | str = THRESHOLDS_PATH) -> list[str]:

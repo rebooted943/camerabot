@@ -48,6 +48,7 @@ def main() -> int:
         return 0
 
     seen: dict[int, str] = {}
+    topics: dict[tuple, str] = {}
     for upd in results:
         msg = (
             upd.get("message")
@@ -62,9 +63,25 @@ def main() -> int:
         title = chat.get("title") or chat.get("username") or chat.get("first_name") or ""
         seen[cid] = f"{chat.get('type', '?')} {title}".strip()
 
+        # Forum topic (supergroup with Topics enabled): message_thread_id.
+        thread = msg.get("message_thread_id")
+        if thread is not None:
+            topic_name = (msg.get("forum_topic_created") or {}).get("name", "")
+            topics[(cid, thread)] = topic_name
+
     print("Discovered chats (use one of these as TELEGRAM_CHAT_ID):")
     for cid, desc in seen.items():
-        print(f"  {cid}\t{desc}")
+        print(f"  chat_id={cid}\t{desc}")
+
+    if topics:
+        print("\nDiscovered forum topics (use as 'topic_id' in thresholds.json channels):")
+        for (cid, thread), name in topics.items():
+            print(f"  chat_id={cid}  topic_id={thread}\t{name}")
+    else:
+        print(
+            "\n(No forum topics seen. To route by topic, create a supergroup with "
+            "Topics enabled, add the bot, post in a topic, then re-run.)"
+        )
     return 0
 
 
