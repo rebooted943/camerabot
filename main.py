@@ -139,7 +139,11 @@ class Sniper:
             )
             if alert:
                 if notify and not settings.dry_run:
-                    await self.notifier.send_alert(alert)
+                    await self.notifier.send_alert(
+                        alert,
+                        chat_id=target.chat_id,
+                        message_thread_id=target.topic_id,
+                    )
                 db.record_alert(alert)
                 result.alerts.append(alert)
             else:
@@ -254,6 +258,14 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
     elif command.action == "remove":
         changed, msg = remove_target(command.arg)
         await notifier.send_text(("\u2705 " if changed else "\u2139\uFE0F ") + msg)
+
+    elif command.action == "clear":
+        removed = db.clear_seen(command.arg or None)
+        scope = f" matching '{command.arg}'" if command.arg else ""
+        await notifier.send_text(
+            f"\U0001F9F9 Forgot {removed} seen ad(s){scope}. "
+            "The next scan will re-check them from scratch."
+        )
 
     elif command.action == "scan_all":
         n_targets = len(list_labels())

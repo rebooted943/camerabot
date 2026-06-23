@@ -147,6 +147,7 @@ them up and replies in chat:
 | `/add <query>`           | Add a target to the watch list (persisted + committed)   |
 | `/remove <query \| #>`   | Remove a target by name or list index                    |
 | `/list`                  | Show tracked targets                                     |
+| `/clear [query]`         | Forget seen ads (all, or matching a query) so the next scan re-notifies them |
 | `/help`                  | Show the command help                                    |
 
 Only the chat id in `TELEGRAM_CHAT_ID` is allowed to issue commands. Response
@@ -154,6 +155,33 @@ latency depends on the poll interval plus GitHub's scheduled-run delay; you can
 also trigger a scan immediately from **Actions → run workflow** (with an optional
 `query` input). One-off `/search` scans use MPB search as the floor benchmark; if
 MPB has no price they still reply with the cheapest matching listings.
+
+## Routing alerts to channels / topics
+
+By default every alert goes to `TELEGRAM_CHAT_ID`. To filter gear by
+category in Telegram you can route each target to its own channel or to a
+**forum topic** (a supergroup with *Topics* enabled). Define named channels in
+`thresholds.json` and point targets at them:
+
+```json
+{
+  "channels": {
+    "sony":  { "chat_id": "-1001234567890", "topic_id": 12 },
+    "canon": { "chat_id": "-1001234567890", "topic_id": 14 }
+  },
+  "targets": [
+    { "label": "Sony A7 III (body)", "queries": ["Sony A7 III"], "channel": "sony" },
+    { "label": "Canon EOS R6 (body)", "queries": ["Canon EOS R6"], "channel": "canon" }
+  ]
+}
+```
+
+- `chat_id` is a channel/group id (e.g. `-100…`); the bot must be an admin there.
+- `topic_id` is the forum-topic thread id (`message_thread_id`); omit it to post
+  to the channel/group root.
+- A target may also set `chat_id`/`topic_id` directly instead of using a named channel.
+- Discover both ids with `scripts/get_chat_id.py` (it prints chat ids and any
+  forum topic ids it sees).
 
 ## Run a single query locally
 

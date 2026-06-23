@@ -7,6 +7,7 @@ Supported commands (sent as Telegram messages to the bot):
     /add <query>          -> add <query> to the tracked targets (persisted)
     /remove <query|index> -> remove a tracked target
     /list                 -> list tracked targets
+    /clear [query]        -> forget seen ads (all, or only those matching query)
     /help, /start         -> show help
 """
 
@@ -30,6 +31,8 @@ HELP_TEXT = (
     "\u2022 <code>/add &lt;query&gt;</code> \u2014 add a target to the watch list\n"
     "\u2022 <code>/remove &lt;query|#&gt;</code> \u2014 remove a target\n"
     "\u2022 <code>/list</code> \u2014 show tracked targets\n"
+    "\u2022 <code>/clear [query]</code> \u2014 forget seen ads (all, or matching query) "
+    "so the next scan starts clean\n"
     "\u2022 <code>/help</code> \u2014 this message"
 )
 
@@ -58,6 +61,8 @@ def parse(text: str) -> Command:
         return Command("remove", arg)
     if cmd in ("/list", "/targets"):
         return Command("list", arg)
+    if cmd in ("/clear", "/reset", "/purge"):
+        return Command("clear", arg)
     if cmd in ("/help", "/start"):
         return Command("help", arg)
     return Command("unknown", text)

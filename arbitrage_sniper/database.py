@@ -109,6 +109,25 @@ class Database:
     def record_alert(self, alert: Alert) -> None:
         self.record_item(alert.item, alerted=True, safe_gain=alert.safe_gain)
 
+    def clear_seen(self, like: str | None = None) -> int:
+        """Forget previously-seen ads so the next scan re-notifies them.
+
+        With ``like`` set, only ads whose title/platform/link matches the
+        (case-insensitive) substring are forgotten; otherwise the whole
+        de-dup table is wiped. Returns the number of rows removed.
+        """
+        if like:
+            pattern = f"%{like.lower()}%"
+            cur = self.conn.execute(
+                "DELETE FROM seen_ads WHERE lower(title) LIKE ? "
+                "OR lower(platform) LIKE ? OR lower(link) LIKE ?",
+                (pattern, pattern, pattern),
+            )
+        else:
+            cur = self.conn.execute("DELETE FROM seen_ads")
+        self.conn.commit()
+        return cur.rowcount if cur.rowcount is not None else 0
+
     # ------------------------------------------------------------------ #
     # run bookkeeping
     # ------------------------------------------------------------------ #

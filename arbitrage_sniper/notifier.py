@@ -77,17 +77,28 @@ class TelegramNotifier:
     def enabled(self) -> bool:
         return bool(self.token and self.chat_id)
 
-    async def _send(self, text: str, *, disable_preview: bool = False) -> bool:
-        if not self.enabled:
+    async def _send(
+        self,
+        text: str,
+        *,
+        disable_preview: bool = False,
+        chat_id: Optional[str] = None,
+        message_thread_id: Optional[int] = None,
+    ) -> bool:
+        target_chat = chat_id or self.chat_id
+        if not (self.token and target_chat):
             logger.warning("telegram disabled (missing token/chat id); message dropped")
             logger.info("would have sent:\n%s", text)
             return False
         payload = {
-            "chat_id": self.chat_id,
+            "chat_id": target_chat,
             "text": text,
             "parse_mode": "HTML",
             "disable_web_page_preview": disable_preview,
         }
+        # Route to a specific forum topic (supergroup with Topics enabled).
+        if message_thread_id is not None:
+            payload["message_thread_id"] = message_thread_id
         url = TELEGRAM_API.format(token=self.token)
         try:
             async with http_client() as client:
@@ -100,8 +111,18 @@ class TelegramNotifier:
             logger.error("telegram send failed: %s", exc)
             return False
 
-    async def send_alert(self, alert: Alert) -> bool:
-        return await self._send(render_alert(alert))
+    async def send_alert(
+        self,
+        alert: Alert,
+        *,
+        chat_id: Optional[str] = None,
+        message_thread_id: Optional[int] = None,
+    ) -> bool:
+        return await self._send(
+            render_alert(alert),
+            chat_id=chat_id,
+            message_thread_id=message_thread_id,
+        )
 
     async def send_text(self, text: str) -> bool:
         return await self._send(text, disable_preview=True)

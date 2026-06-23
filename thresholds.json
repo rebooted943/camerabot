@@ -1,5 +1,7 @@
 {
   "_comment": "Bridge config. Each target defines: search 'queries' (buy-side), MPB 'mpb_id' (slug/URL) and optional 'mpb_floor' (EUR manual override/fallback), 'ebay_query'/'f64_query' for benchmarks, and an optional 'match' block. match.include = terms that MUST all be present in the title (use '|' for alternatives); match.exclude = extra terms that reject the listing. Global accessory excludes (grip, battery, charger, ...) are always applied. All benchmark prices are treated as EUR.",
+  "_channels_help": "Optional routing. Define named channels under 'channels' (each with a 'chat_id' and optional 'topic_id' for a Telegram forum-topic thread), then set 'channel': '<name>' on a target to send its alerts there. A target may also set 'chat_id'/'topic_id' directly. If unset, alerts go to the default TELEGRAM_CHAT_ID. Use scripts/get_chat_id.py to discover chat_id and topic_id.",
+  "channels": {},
   "targets": [
     {
       "label": "Sony A7 III (body)",
