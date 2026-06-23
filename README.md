@@ -86,6 +86,12 @@ Item(id, title, price, link, platform, condition, image_url)
 
 ## Configuration
 
+Need the chat id? Send `/start` to your bot in Telegram, then run:
+
+```bash
+TELEGRAM_TOKEN=123:abc python scripts/get_chat_id.py
+```
+
 Set secrets/env (see `.env.example`):
 
 | Variable             | Required | Purpose                                            |
