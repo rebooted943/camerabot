@@ -256,15 +256,25 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
         await notifier.send_text(("\u2705 " if changed else "\u2139\uFE0F ") + msg)
 
     elif command.action == "scan_all":
-        await notifier.send_text("\U0001F3AF Running full scan...")
+        n_targets = len(list_labels())
+        await notifier.send_text(
+            f"\U0001F3AF <b>Scan started</b> \u2014 {n_targets} target(s). "
+            "Scraping providers + benchmarks, I'll report back when done\u2026"
+        )
         s, n, a = await sniper.scan_all(db)
-        await notifier.send_summary(scanned=s, new_ads=n, alerts=a)
+        await notifier.send_text(
+            f"\u2705 <b>Scan finished</b>\n"
+            f"\u2022 scanned: {s}\n\u2022 new ads: {n}\n\u2022 alerts: {a}"
+        )
 
     elif command.action == "scan_query":
         if not command.arg:
             await notifier.send_text("usage: /scan <query>")
             return
-        await notifier.send_text(f"\U0001F50D Scanning '{command.arg}'...")
+        await notifier.send_text(
+            f"\U0001F50D <b>Scan started</b> for '<b>{command.arg}</b>'\u2026 "
+            "this can take up to a minute."
+        )
         result = await sniper.scan_query(command.arg, db)
         await notifier.send_text(_render_adhoc_reply(result))
 
