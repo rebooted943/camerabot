@@ -22,7 +22,10 @@ concurrency:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: on Ubuntu 24.04 (noble) `libasound2` is a virtual
+    # package (libasound2t64) and `playwright install --with-deps` fails with
+    # "Package 'libasound2' has no installation candidate".
+    runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
