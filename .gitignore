@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.local
+
+# Playwright artifacts
+.playwright/
+playwright-report/
+test-results/
+screenshots/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# NOTE: seen_ads.db is intentionally NOT ignored.
+# The GitHub Action commits it back to the repo to persist de-duplication state.
