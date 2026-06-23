@@ -15,6 +15,7 @@ import urllib.parse
 
 from ..browser import http_client, jitter
 from ..config import settings
+from ..matching import auto_include_terms, is_relevant
 from ..models import Benchmark, parse_price
 from .base import BaseBenchmark
 
@@ -35,14 +36,15 @@ class EbayBenchmark(BaseBenchmark):
         }
         return f"https://www.ebay.de/sch/i.html?{urllib.parse.urlencode(params)}"
 
-    async def _lookup(self, key: str, **_) -> Benchmark:
+    async def _lookup(self, key: str, *, include_terms=None, **_) -> Benchmark:
+        include_terms = include_terms or auto_include_terms(key)
         if settings.ebay_app_token:
-            result = await self._via_api(key)
+            result = await self._via_api(key, include_terms)
             if result.available:
                 return result
-        return await self._via_scrape(key)
+        return await self._via_scrape(key, include_terms)
 
-    async def _via_api(self, query: str) -> Benchmark:
+    async def _via_api(self, query: str, include_terms) -> Benchmark:
         headers = {
             "Authorization": f"Bearer {settings.ebay_app_token}",
             "X-EBAY-C-MARKETPLACE-ID": "EBAY_DE",
@@ -62,19 +64,22 @@ class EbayBenchmark(BaseBenchmark):
 
         prices: list[float] = []
         for it in data.get("itemSummaries", []) or []:
+            title = it.get("title") or ""
+            if title and not is_relevant(title, include_terms):
+                continue
             price_obj = it.get("price") or {}
             p = parse_price(price_obj.get("value"))
             if p:
                 prices.append(p)
-        avg = self._avg(prices)
+        avg = self._aggregate(prices)
         return Benchmark(
             source=self.name,
             value=avg,
             sample_size=len(prices),
-            note=f"Browse API ({len(prices)} active listings)",
+            note=f"Browse API ({len(prices)} matched listings)",
         )
 
-    async def _via_scrape(self, query: str) -> Benchmark:
+    async def _via_scrape(self, query: str, include_terms) -> Benchmark:
         url = self._sold_url(query)
         async with self.browser.context() as page:
             try:
@@ -88,6 +93,11 @@ class EbayBenchmark(BaseBenchmark):
             cards = await page.query_selector_all("li.s-item, .s-item")
             for card in cards:
                 try:
+                    title_el = await card.query_selector(".s-item__title")
+                    title = (await title_el.inner_text()) if title_el else ""
+                    if title and not is_relevant(title, include_terms):
+                        continue
+
                     price_el = await card.query_selector(".s-item__price")
                     if not price_el:
                         continue
@@ -100,11 +110,11 @@ class EbayBenchmark(BaseBenchmark):
                 except Exception:
                     continue
 
-            avg = self._avg(prices)
+            avg = self._aggregate(prices)
             return Benchmark(
                 source=self.name,
                 value=avg,
                 sample_size=len(prices),
                 url=url,
-                note=f"sold-items scrape ({len(prices)} samples)",
+                note=f"sold-items scrape ({len(prices)} matched samples)",
             )

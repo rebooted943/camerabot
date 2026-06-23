@@ -64,6 +64,20 @@ def evaluate(
         f64_price=f64.value if (f64 and f64.available) else None,
         margin_used=margin,
     )
+
+    # Sanity guard: an implausibly large gain is almost always a scam, a
+    # mis-parsed price, or a "for parts" listing. Drop it instead of alerting.
+    if alert.safe_gain_pct > settings.max_gain_pct:
+        logger.warning(
+            "skip %s: suspicious gain %.0f%% (> %.0f%% cap) buy=%.2f mpb=%.2f",
+            item.unique_key,
+            alert.safe_gain_pct,
+            settings.max_gain_pct,
+            item.price,
+            alert.mpb_price,
+        )
+        return None
+
     logger.info(
         "TRIGGER %s | buy=%.2f mpb=%.2f safe_gain=%.2f potential=%s",
         item.unique_key,

@@ -24,10 +24,13 @@ buy-side providers ──┐
 **Trigger rule (risk-zero):**
 
 ```
-buy_price  ≤  mpb_price × MPB_MARGIN        (MPB_MARGIN default 0.90)
+buy_price ≤ mpb_price × MPB_MARGIN     AND     gain% ≤ MAX_GAIN_PCT
+            (MPB_MARGIN default 0.90)                  (default 500%)
 ```
 
-The 10% cushion covers shipping/fees. For every alert two spreads are computed:
+The 10% cushion covers shipping/fees. The `MAX_GAIN_PCT` guard drops
+"too-good-to-be-true" listings (scams / mis-parsed prices / part-outs). For
+every alert two spreads are computed:
 
 | Metric            | Formula                                  | Meaning                 |
 | ----------------- | ---------------------------------------- | ----------------------- |
@@ -36,6 +39,12 @@ The 10% cushion covers shipping/fees. For every alert two spreads are computed:
 
 All prices are normalised to EUR (see `arbitrage_sniper/currency.py`) before any
 comparison, since providers report mixed RON/EUR.
+
+**Relevance filter.** Every listing (and every benchmark sample) is checked
+against per-target match rules (`arbitrage_sniper/matching.py`) so accessories
+("battery grip", "charger") and wrong models ("A7 II", "EOS 1300D") are dropped.
+Matching uses word-boundary regexes, so `iii` is never matched by an `ii` rule
+and `a7` never matches `a7r`.
 
 ## Project structure
 
@@ -46,20 +55,28 @@ comparison, since providers report mixed RON/EUR.
 ├── requirements.txt
 ├── seen_ads.db                      # SQLite de-dup state (committed by the Action)
 ├── .env.example                     # local env template
+├── scripts/
+│   └── get_chat_id.py               # helper to discover TELEGRAM_CHAT_ID
 ├── .github/
 │   └── workflows/
-│       └── sniper.yml               # scheduled GitHub Action (cron */15)
+│       ├── sniper.yml               # scheduled scan (cron */15)
+│       ├── commands.yml             # Telegram command poller (cron */5)
+│       └── ci.yml                   # runs pytest on push/PR
 ├── tests/
-│   └── test_arbitrage.py            # unit tests for the pure logic
+│   ├── test_arbitrage.py            # pure trigger/spread logic
+│   └── test_matching.py             # relevance + gain cap + aggregation
 └── arbitrage_sniper/
     ├── __init__.py
     ├── config.py                    # env-driven settings
     ├── models.py                    # Item / Benchmark / Alert dataclasses + parsers
+    ├── matching.py                  # relevance matching (accessories/wrong models)
+    ├── targets.py                   # Target model + thresholds.json add/remove/list
+    ├── commands.py                  # Telegram command parser
     ├── currency.py                  # RON/USD/GBP → EUR normalisation
     ├── browser.py                   # async Playwright + stealth + UA rotation + jitter
-    ├── database.py                  # SQLite manager (seen_ads + run_log)
+    ├── database.py                  # SQLite manager (seen_ads + run_log + bot_state)
     ├── arbitrage.py                 # core trigger + spread calculation (pure)
-    ├── notifier.py                  # Telegram HTML notifier
+    ├── notifier.py                  # Telegram HTML notifier + getUpdates
     ├── providers/                   # BUY side
     │   ├── base.py
     │   ├── olx.py                   # olx.ro  (Cloudflare/Datadome → stealth browser)
@@ -86,6 +103,12 @@ Item(id, title, price, link, platform, condition, image_url)
 
 ## Configuration
 
+Need the chat id? Send `/start` to your bot in Telegram, then run:
+
+```bash
+TELEGRAM_TOKEN=123:abc python scripts/get_chat_id.py
+```
+
 Set secrets/env (see `.env.example`):
 
 | Variable             | Required | Purpose                                            |
@@ -111,13 +134,46 @@ python main.py --dry-run   # sends a Telegram ping and exits
 python main.py             # full scan
 ```
 
+## Telegram commands
+
+Send these messages to the bot; the `commands.yml` poller (cron `*/5`) picks
+them up and replies in chat:
+
+| Command                  | Effect                                                   |
+| ------------------------ | -------------------------------------------------------- |
+| `/scan`                  | Run a full scan of all tracked targets now               |
+| `/scan <query>`          | One-off scan for a query, e.g. `/scan fujifilm x-t50`    |
+| `/search <query>`        | Alias of `/scan <query>`                                 |
+| `/add <query>`           | Add a target to the watch list (persisted + committed)   |
+| `/remove <query \| #>`   | Remove a target by name or list index                    |
+| `/list`                  | Show tracked targets                                     |
+| `/help`                  | Show the command help                                    |
+
+Only the chat id in `TELEGRAM_CHAT_ID` is allowed to issue commands. Response
+latency depends on the poll interval plus GitHub's scheduled-run delay; you can
+also trigger a scan immediately from **Actions → run workflow** (with an optional
+`query` input). One-off `/search` scans use MPB search as the floor benchmark; if
+MPB has no price they still reply with the cheapest matching listings.
+
+## Run a single query locally
+
+```bash
+python main.py --query "Nikon Z6 II"   # scrape + benchmark + reply once
+python main.py --listen                 # process pending Telegram commands
+```
+
 ## GitHub Actions
 
-`.github/workflows/sniper.yml` runs on a `*/15` cron (and manual dispatch),
-installs Chromium, runs the scan, and commits the updated `seen_ads.db` back to
-the repo so de-dup state survives between runs. Credentials come from
-**GitHub Secrets** (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, optional
-`EBAY_APP_TOKEN`).
+- `sniper.yml` runs on a `*/15` cron (and manual dispatch), installs Chromium,
+  runs the scan, and commits the updated `seen_ads.db` back to the repo so
+  de-dup state survives between runs.
+- `commands.yml` runs on a `*/5` cron and processes Telegram commands; it commits
+  both `seen_ads.db` and `thresholds.json` (so `/add` and `/remove` persist).
+- Both share one `concurrency` group so they never race on the database.
+
+Credentials come from **GitHub Secrets** (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
+optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
+`playwright install --with-deps` fails on Ubuntu 24.04 (`libasound2`).
 
 ## Tests
 

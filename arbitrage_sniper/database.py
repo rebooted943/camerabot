@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS run_log (
     alerts      INTEGER DEFAULT 0,
     note        TEXT
 );
+
+CREATE TABLE IF NOT EXISTS bot_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -122,6 +127,23 @@ class Database:
              WHERE id = ?
             """,
             (int(time.time()), scanned, new_ads, alerts, note, run_id),
+        )
+        self.conn.commit()
+
+    # ------------------------------------------------------------------ #
+    # generic key/value state (e.g. Telegram getUpdates offset)
+    # ------------------------------------------------------------------ #
+    def get_state(self, key: str, default: str | None = None) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM bot_state WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else default
+
+    def set_state(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO bot_state (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
         )
         self.conn.commit()
 

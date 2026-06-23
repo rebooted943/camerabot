@@ -50,10 +50,34 @@ class BaseBenchmark(ABC):
     @staticmethod
     def _avg(values: list[float], trim: float = 0.1) -> Optional[float]:
         """Trimmed mean to dampen outliers (e.g. mispriced sold listings)."""
-        clean = sorted(v for v in values if v and v > 0)
+        return BaseBenchmark._aggregate(values, trim=trim, use_median=False)
+
+    @staticmethod
+    def _aggregate(
+        values: list[float],
+        *,
+        lo: float = 5.0,
+        hi: float = 20000.0,
+        trim: float = 0.1,
+        use_median: bool = True,
+    ) -> Optional[float]:
+        """Robust central value with hard sanity bounds.
+
+        Prices outside ``[lo, hi]`` EUR are dropped first (this is what kills
+        the bogus "25848 EUR" F64 reading caused by mis-parsed page numbers).
+        By default returns the median, which is far more resistant to the
+        occasional outlier than a mean.
+        """
+        clean = sorted(v for v in values if v and lo <= v <= hi)
         if not clean:
             return None
         if len(clean) >= 5 and trim > 0:
             k = int(len(clean) * trim)
             clean = clean[k: len(clean) - k] or clean
-        return round(sum(clean) / len(clean), 2)
+        if use_median:
+            n = len(clean)
+            mid = n // 2
+            value = clean[mid] if n % 2 else (clean[mid - 1] + clean[mid]) / 2
+        else:
+            value = sum(clean) / len(clean)
+        return round(value, 2)
