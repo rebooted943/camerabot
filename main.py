@@ -9,7 +9,8 @@ Modes:
     python main.py --query "..."  # one-off scan for a single query
 
 Pipeline per target:
-    1. Scrape every buy-side provider (OLX, Vinted, Publi24, Wallapop).
+    1. Scrape every buy-side provider (Subito, eBay.it, Back Market, Facebook
+       Marketplace, OLX, Publi24, Vinted EU west+east).
     2. Keep only listings whose title actually matches the target (relevance
        filter: drops grips/batteries/wrong models).
     3. Drop ads already in seen_ads.db and normalise prices to EUR.
@@ -138,14 +139,24 @@ class Sniper:
                 it, target_label=target.label, mpb=mpb, ebay=ebay, f64=f64
             )
             if alert:
+                delivered = True
                 if notify and not settings.dry_run:
-                    await self.notifier.send_alert(
+                    delivered = await self.notifier.send_alert(
                         alert,
                         chat_id=target.chat_id,
                         message_thread_id=target.topic_id,
                     )
-                db.record_alert(alert)
-                result.alerts.append(alert)
+                if delivered:
+                    db.record_alert(alert)
+                    result.alerts.append(alert)
+                else:
+                    # Delivery failed: do NOT mark the ad as seen/alerted, so the
+                    # next run re-evaluates and retries it instead of silently
+                    # dropping the deal (this is the "alerts: 1 but no post" bug).
+                    logger.error(
+                        "alert delivery FAILED for %s; left unseen for retry",
+                        it.unique_key,
+                    )
             else:
                 # Record even non-triggering ads so they are never re-evaluated
                 # / re-notified on subsequent runs.

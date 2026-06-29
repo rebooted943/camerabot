@@ -14,10 +14,10 @@ margin. Built to run unattended from GitHub Actions every 10–15 minutes.
 
 ```
 buy-side providers ──┐
- (OLX, Vinted,       │      ┌── MPB  (primary / floor "safety" price)
-  Publi24, Wallapop) ├──▶  benchmarks ── eBay.de sold (secondary / retail target)
-                     │      └── F64.ro used (secondary / retail reference)
-                     ▼
+ (Subito, eBay.it,   │      ┌── MPB  (primary / floor "safety" price)
+  Back Market, FB,    ├──▶  benchmarks ── eBay.de sold (secondary / retail target)
+  OLX, Publi24,      │      └── F64.ro used (secondary / retail reference)
+  Vinted EU)         ▼
             arbitrage engine  ──▶  Telegram alert  ──▶  SQLite (de-dup, committed by CI)
 ```
 
@@ -77,12 +77,16 @@ and `a7` never matches `a7r`.
     ├── database.py                  # SQLite manager (seen_ads + run_log + bot_state)
     ├── arbitrage.py                 # core trigger + spread calculation (pure)
     ├── notifier.py                  # Telegram HTML notifier + getUpdates
-    ├── providers/                   # BUY side
+    ├── providers/                   # BUY side (Italy + Romania only)
     │   ├── base.py
-    │   ├── olx.py                   # olx.ro  (Cloudflare/Datadome → stealth browser)
-    │   ├── vinted.py                # vinted.ro (warm cookies → internal JSON API)
-    │   ├── publi24.py               # publi24.ro (DOM scrape)
-    │   └── wallapop.py              # wallapop.com (warm cookies → search API)
+    │   ├── subito.py                # subito.it
+    │   ├── ebay_it.py               # ebay.it active listings
+    │   ├── backmarket.py            # backmarket.it refurbished gear
+    │   ├── facebook.py              # Facebook Marketplace (IT + RO cities)
+    │   ├── olx.py                   # olx.ro
+    │   ├── publi24.py               # publi24.ro
+    │   └── vinted.py                # all EU Vinted storefronts (west + east)
+    │       └── vinted_markets.py    # country domain registry
     └── benchmarks/                  # VALUATION side
         ├── base.py
         ├── mpb.py                   # mpb.com/en-eu  (primary floor price)
@@ -116,6 +120,9 @@ Set secrets/env (see `.env.example`):
 | `TELEGRAM_TOKEN`     | yes      | Bot token from @BotFather                          |
 | `TELEGRAM_CHAT_ID`   | yes      | Target chat/channel id                             |
 | `EBAY_APP_TOKEN`     | no       | eBay Browse API token (falls back to scraping)     |
+| `FACEBOOK_COOKIES_PATH` | no    | Path to Playwright cookies JSON for FB Marketplace |
+| `VINTED_REGIONS`     | no       | `west`, `east`, or `west,east` (default: both)     |
+| `VINTED_MARKETS`     | no       | Override: comma codes e.g. `it,ro,fr,pl,de`        |
 | `MPB_MARGIN`         | no       | Trigger margin (default `0.90`)                    |
 | `MIN_DELAY`/`MAX_DELAY` | no    | Random delay between requests (default 2–6 s)      |
 | `HEADLESS`           | no       | `true` in CI, `false` to watch the browser locally |

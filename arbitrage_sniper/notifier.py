@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
+import re
 from typing import Optional
 
 from .browser import http_client
@@ -18,6 +20,15 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 def _esc(text: object) -> str:
     """Escape text for Telegram HTML parse mode."""
     return html.escape(str(text), quote=False)
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(text: str) -> str:
+    """Turn an HTML message into readable plain text (fallback on parse errors)."""
+    no_tags = _TAG_RE.sub("", text)
+    return html.unescape(no_tags)
 
 
 def _fmt_money(value: Optional[float], currency: str = "EUR") -> str:
@@ -103,10 +114,38 @@ class TelegramNotifier:
         try:
             async with http_client() as client:
                 resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
+                if resp.status_code == 200:
+                    return True
+
                 logger.error("telegram error %s: %s", resp.status_code, resp.text[:300])
+
+                # 429: respect Telegram's retry_after, then retry once.
+                if resp.status_code == 429:
+                    retry_after = 1
+                    try:
+                        retry_after = int(resp.json().get("parameters", {}).get("retry_after", 1))
+                    except Exception:
+                        pass
+                    await asyncio.sleep(min(retry_after, 30) + 1)
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        return True
+                    logger.error("telegram retry after 429 failed %s: %s", resp.status_code, resp.text[:300])
+
+                # 400 is usually an HTML parse error: retry once as plain text so
+                # the alert is at least delivered (formatting/links stripped).
+                if resp.status_code == 400 and payload.get("parse_mode"):
+                    fallback = {k: v for k, v in payload.items() if k != "parse_mode"}
+                    fallback["text"] = _strip_html(text)
+                    resp = await client.post(url, json=fallback)
+                    if resp.status_code == 200:
+                        logger.warning("telegram: delivered as plain text after HTML 400")
+                        return True
+                    logger.error(
+                        "telegram plain-text fallback failed %s: %s",
+                        resp.status_code, resp.text[:300],
+                    )
                 return False
-            return True
         except Exception as exc:  # pragma: no cover - network failures
             logger.error("telegram send failed: %s", exc)
             return False

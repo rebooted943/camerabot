@@ -17,6 +17,11 @@ import os
 _DEFAULT_RATES = {
     "EUR": 1.0,
     "RON": 0.20,   # ~1 RON ≈ 0.20 EUR
+    "PLN": 0.23,
+    "CZK": 0.041,
+    "HUF": 0.0026,
+    "DKK": 0.13,
+    "SEK": 0.088,
     "USD": 0.92,
     "GBP": 1.17,
 }

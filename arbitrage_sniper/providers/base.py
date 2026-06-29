@@ -92,3 +92,39 @@ class BaseProvider(ABC):
         except Exception as exc:
             logger.warning("[%s] navigation to %s failed: %s", self.name, url, exc)
             return False
+
+    @staticmethod
+    async def _next_data(page) -> dict | None:
+        """Read a Next.js ``__NEXT_DATA__`` blob if present."""
+        import json
+
+        try:
+            raw = await page.evaluate(
+                "() => { const el = document.getElementById('__NEXT_DATA__');"
+                " return el ? el.textContent : null; }"
+            )
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+
+    @staticmethod
+    async def _in_page_fetch(page, url: str, *, headers: dict | None = None) -> dict | list | None:
+        """Call an internal JSON endpoint from inside the warmed browser session."""
+        try:
+            data = await page.evaluate(
+                """async ({url, headers}) => {
+                    const r = await fetch(url, {
+                        headers: Object.assign({'Accept': 'application/json'}, headers || {}),
+                        credentials: 'include'
+                    });
+                    if (!r.ok) return {error: r.status};
+                    return await r.json();
+                }""",
+                {"url": url, "headers": headers or {}},
+            )
+            if isinstance(data, dict) and "error" in data:
+                return None
+            return data
+        except Exception as exc:
+            logger.debug("in-page fetch failed: %s", exc)
+            return None

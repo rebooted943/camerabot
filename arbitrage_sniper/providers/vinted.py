@@ -1,9 +1,9 @@
-"""Vinted provider.
+"""Vinted provider — all EU storefronts (Western + Eastern Europe).
 
-Vinted exposes a JSON catalog API but guards it with Datadome. The reliable
-trick is to load the site in a stealth browser first (so the anti-bot cookies
-are minted), then call the internal API from within the page context using the
-already-authenticated session.
+Each country domain exposes the same ``/api/v2/catalog/items`` JSON API but
+requires its own Datadome-warmed session. We visit every active storefront in
+one browser context, merge results, and return the cheapest listings overall
+(prices compared in EUR).
 """
 
 from __future__ import annotations
@@ -12,8 +12,11 @@ import logging
 import urllib.parse
 
 from ..browser import jitter
+from ..config import settings
+from ..currency import to_eur
 from ..models import Item, parse_price
 from .base import BaseProvider
+from .vinted_markets import VintedStorefront, active_storefronts
 
 logger = logging.getLogger("arbitrage_sniper.providers.vinted")
 
@@ -23,57 +26,96 @@ class VintedProvider(BaseProvider):
     label = "Vinted (EU)"
     requires_browser = True
 
-    # vinted.ro is the RO storefront; the catalog API path is shared EU-wide.
-    BASE = "https://www.vinted.ro"
-
-    def _api_url(self, query: str, per_page: int) -> str:
+    def _api_url(self, storefront: VintedStorefront, query: str, per_page: int) -> str:
         params = {
             "search_text": query,
             "order": "price_low_to_high",
             "per_page": per_page,
             "page": 1,
         }
-        return f"{self.BASE}/api/v2/catalog/items?{urllib.parse.urlencode(params)}"
+        return f"{storefront.base_url}/api/v2/catalog/items?{urllib.parse.urlencode(params)}"
+
+    def _storefronts(self) -> list[VintedStorefront]:
+        return active_storefronts(
+            regions=settings.vinted_regions,
+            markets=settings.vinted_markets,
+        )
 
     async def search(self, query: str) -> list[Item]:
+        storefronts = self._storefronts()
+        if not storefronts:
+            logger.warning("[vinted] no storefronts selected (check VINTED_REGIONS / VINTED_MARKETS)")
+            return []
+
+        # Pull a small batch from each market, then keep the global cheapest.
+        per_store = min(20, max(6, self.max_items))
+        items: list[Item] = []
+        seen_keys: set[str] = set()
+
         async with self.browser.context() as page:
-            # 1. Warm up the session so Datadome cookies are set.
-            if not await self._goto(page, self.BASE):
-                return []
-            await jitter(1.5, 3.5)
+            for sf in storefronts:
+                batch = await self._search_storefront(page, sf, query, per_store)
+                for it in batch:
+                    if it.unique_key in seen_keys:
+                        continue
+                    seen_keys.add(it.unique_key)
+                    items.append(it)
 
-            # 2. Call the internal API from inside the page (uses session cookies).
-            url = self._api_url(query, min(self.max_items, 96))
-            try:
-                data = await page.evaluate(
-                    """async (url) => {
-                        const r = await fetch(url, {
-                            headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
-                            credentials: 'include'
-                        });
-                        if (!r.ok) return {error: r.status};
-                        return await r.json();
-                    }""",
-                    url,
-                )
-            except Exception as exc:
-                logger.warning("[vinted] in-page fetch failed: %s", exc)
-                return []
+        items.sort(key=lambda i: to_eur(i.price, i.currency))
+        logger.info(
+            "[vinted] merged %d items from %d storefront(s) (%s)",
+            len(items),
+            len(storefronts),
+            ",".join(s.code for s in storefronts),
+        )
+        return items[: self.max_items]
 
-            if not isinstance(data, dict) or "items" not in data:
-                logger.debug("[vinted] unexpected payload: %s", str(data)[:200])
-                return []
+    async def _search_storefront(
+        self,
+        page,
+        storefront: VintedStorefront,
+        query: str,
+        per_page: int,
+    ) -> list[Item]:
+        if not await self._goto(page, storefront.base_url):
+            return []
+        await jitter(1.0, 2.5)
 
-            return self._parse_items(data["items"])
+        url = self._api_url(storefront, query, min(per_page, 96))
+        try:
+            data = await page.evaluate(
+                """async (url) => {
+                    const r = await fetch(url, {
+                        headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+                        credentials: 'include'
+                    });
+                    if (!r.ok) return {error: r.status};
+                    return await r.json();
+                }""",
+                url,
+            )
+        except Exception as exc:
+            logger.warning("[vinted] fetch failed (%s): %s", storefront.code, exc)
+            return []
 
-    def _parse_items(self, raw_items: list) -> list[Item]:
+        if not isinstance(data, dict) or "items" not in data:
+            logger.debug("[vinted] bad payload from %s: %s", storefront.code, str(data)[:200])
+            return []
+
+        parsed = self._parse_items(data["items"], storefront)
+        logger.info("[%s/%s] '%s' -> %d items", self.name, storefront.code, query, len(parsed))
+        return parsed
+
+    def _parse_items(self, raw_items: list, storefront: VintedStorefront) -> list[Item]:
         items: list[Item] = []
         for raw in raw_items or []:
             try:
                 price_obj = raw.get("price") or {}
                 amount = price_obj.get("amount") if isinstance(price_obj, dict) else price_obj
                 price = parse_price(amount)
-                currency = (price_obj.get("currency_code") if isinstance(price_obj, dict) else None) or "EUR"
+                currency = (
+                    price_obj.get("currency_code") if isinstance(price_obj, dict) else None
+                ) or storefront.currency
 
                 photo = raw.get("photo") or {}
                 image = photo.get("url") if isinstance(photo, dict) else None
@@ -81,17 +123,25 @@ class VintedProvider(BaseProvider):
                 user = raw.get("user") or {}
                 seller = user.get("login") if isinstance(user, dict) else None
 
+                raw_id = str(raw.get("id") or "")
+                link = str(raw.get("url") or "")
+                if link and not link.startswith("http"):
+                    link = storefront.base_url.rstrip("/") + (
+                        link if link.startswith("/") else "/" + link
+                    )
+
                 items.append(
                     Item(
-                        id=str(raw.get("id") or ""),
+                        id=f"{storefront.code}:{raw_id}" if raw_id else "",
                         title=str(raw.get("title") or ""),
                         price=price or 0.0,
-                        link=str(raw.get("url") or ""),
+                        link=link,
                         platform=self.name,
                         condition=self.normalise_condition(raw.get("status")),
                         image_url=image,
                         currency=currency,
                         seller_name=seller,
+                        location=f"{storefront.label} ({storefront.code.upper()})",
                     )
                 )
             except Exception:

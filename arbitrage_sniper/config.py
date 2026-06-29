@@ -47,6 +47,8 @@ class Settings:
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
     ebay_app_token: str = field(default_factory=lambda: os.getenv("EBAY_APP_TOKEN", ""))
+    # Playwright cookies JSON for Facebook Marketplace (optional but recommended).
+    facebook_cookies_path: str = field(default_factory=lambda: os.getenv("FACEBOOK_COOKIES_PATH", ""))
 
     headless: bool = field(default_factory=lambda: _bool("HEADLESS", True))
     dry_run: bool = field(default_factory=lambda: _bool("DRY_RUN", False))
@@ -62,6 +64,11 @@ class Settings:
     max_items_per_provider: int = field(
         default_factory=lambda: _int("MAX_ITEMS_PER_PROVIDER", 40)
     )
+
+    # Vinted: scan all EU storefronts by default (west + east). Override with
+    # VINTED_REGIONS=west|east|west,east  or  VINTED_MARKETS=it,ro,fr,pl
+    vinted_regions: str = field(default_factory=lambda: os.getenv("VINTED_REGIONS", "west,east"))
+    vinted_markets: str = field(default_factory=lambda: os.getenv("VINTED_MARKETS", ""))
 
     nav_timeout_ms: int = field(default_factory=lambda: _int("NAV_TIMEOUT_MS", 30000))
 
