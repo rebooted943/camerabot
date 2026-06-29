@@ -48,7 +48,7 @@ class VintedProvider(BaseProvider):
             return []
 
         # Pull a small batch from each market, then keep the global cheapest.
-        per_store = min(20, max(6, self.max_items))
+        per_store = min(settings.vinted_per_store, max(6, self.max_items))
         items: list[Item] = []
         seen_keys: set[str] = set()
 
@@ -77,27 +77,22 @@ class VintedProvider(BaseProvider):
         query: str,
         per_page: int,
     ) -> list[Item]:
-        if not await self._goto(page, storefront.base_url):
-            return []
-        await jitter(1.0, 2.5)
-
         url = self._api_url(storefront, query, min(per_page, 96))
-        try:
-            data = await page.evaluate(
-                """async (url) => {
-                    const r = await fetch(url, {
-                        headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
-                        credentials: 'include'
-                    });
-                    if (!r.ok) return {error: r.status};
-                    return await r.json();
-                }""",
-                url,
-            )
-        except Exception as exc:
-            logger.warning("[vinted] fetch failed (%s): %s", storefront.code, exc)
-            return []
 
+        # Fast path: API fetch only (skip full page load when cookies already warm).
+        data = await self._in_page_fetch(page, url)
+        if isinstance(data, dict) and "items" in data:
+            parsed = self._parse_items(data["items"], storefront)
+            if parsed:
+                logger.info("[%s/%s] '%s' -> %d items (api)", self.name, storefront.code, query, len(parsed))
+                return parsed
+
+        if not await self._goto(page, storefront.base_url, fast=True):
+            return []
+        lo, hi = (0.4, 1.0) if settings.is_ci else (1.0, 2.0)
+        await jitter(lo, hi)
+
+        data = await self._in_page_fetch(page, url)
         if not isinstance(data, dict) or "items" not in data:
             logger.debug("[vinted] bad payload from %s: %s", storefront.code, str(data)[:200])
             return []

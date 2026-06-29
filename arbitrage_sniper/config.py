@@ -69,11 +69,17 @@ class Settings:
     # VINTED_REGIONS=west|east|west,east  or  VINTED_MARKETS=it,ro,fr,pl
     vinted_regions: str = field(default_factory=lambda: os.getenv("VINTED_REGIONS", "west,east"))
     vinted_markets: str = field(default_factory=lambda: os.getenv("VINTED_MARKETS", ""))
+    # Items fetched per Vinted storefront before merging (lower = faster runs).
+    vinted_per_store: int = field(default_factory=lambda: _int("VINTED_PER_STORE", 12))
 
     nav_timeout_ms: int = field(default_factory=lambda: _int("NAV_TIMEOUT_MS", 30000))
 
     # Telegram command listener (poll getUpdates once per --listen run).
     command_poll_timeout: int = field(default_factory=lambda: _int("COMMAND_POLL_TIMEOUT", 0))
+
+    @property
+    def is_ci(self) -> bool:
+        return _bool("CI", False)
 
     @property
     def telegram_enabled(self) -> bool:

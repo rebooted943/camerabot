@@ -26,12 +26,17 @@ jobs:
   listen:
     # Pinned to 22.04 (Playwright --with-deps fails on noble/24.04, libasound2).
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
+      CI: "true"
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       EBAY_APP_TOKEN: ${{ secrets.EBAY_APP_TOKEN }}
       HEADLESS: "true"
+      MIN_DELAY: "1"
+      MAX_DELAY: "2.5"
+      VINTED_PER_STORE: "8"
+      VINTED_MARKETS: "it,ro,fr,de,es,pl,uk,nl,be,pt,at,cz,hu"
     steps:
       - uses: actions/checkout@v4
 

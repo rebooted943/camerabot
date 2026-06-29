@@ -90,6 +90,10 @@ class FacebookMarketplaceProvider(BaseProvider):
         return f"{self.BASE}/marketplace/{city}/search/?{urllib.parse.urlencode(params)}"
 
     async def search(self, query: str) -> list[Item]:
+        if not settings.facebook_cookies_path:
+            logger.info("[facebook] skipped (no FACEBOOK_COOKIES_PATH)")
+            return []
+
         items: list[Item] = []
         seen_keys: set[str] = set()
 

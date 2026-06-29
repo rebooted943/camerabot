@@ -80,6 +80,42 @@ class Sniper:
         self.ebay = EbayBenchmark(browser)
         self.f64 = F64Benchmark(browser)
         self.notifier = TelegramNotifier()
+        # (provider_name, normalised_query) -> items; avoids re-scraping the same
+        # query when multiple targets share it (critical for Vinted EU).
+        self._search_cache: dict[tuple[str, str], list[Item]] = {}
+
+    @staticmethod
+    def _query_key(query: str) -> str:
+        return query.strip().lower()
+
+    async def prefetch_queries(self, targets: list[Target]) -> None:
+        """Scrape each provider/query pair once before processing targets."""
+        canonical: dict[str, str] = {}
+        for target in targets:
+            for query in target.queries:
+                key = self._query_key(query)
+                canonical.setdefault(key, query)
+
+        if not canonical:
+            return
+
+        logger.info("prefetch: %d unique queries across %d target(s)", len(canonical), len(targets))
+        for provider in self.providers:
+            if provider.name == "facebook" and not settings.facebook_cookies_path:
+                logger.info("[facebook] skipped prefetch (no FACEBOOK_COOKIES_PATH)")
+                for key in canonical:
+                    self._search_cache[(provider.name, key)] = []
+                continue
+            for key, query in canonical.items():
+                await self._cached_provider_search(provider, query)
+
+    async def _cached_provider_search(self, provider, query: str) -> list[Item]:
+        key = (provider.name, self._query_key(query))
+        if key in self._search_cache:
+            return self._search_cache[key]
+        items = await provider.safe_search(query)
+        self._search_cache[key] = items
+        return items
 
     async def collect_items(self, target: Target) -> list[Item]:
         include = target.effective_include
@@ -87,8 +123,10 @@ class Sniper:
         items: list[Item] = []
         seen_keys: set[str] = set()
         for provider in self.providers:
+            if provider.name == "facebook" and not settings.facebook_cookies_path:
+                continue
             for query in target.queries:
-                for it in await provider.safe_search(query):
+                for it in await self._cached_provider_search(provider, query):
                     if it.unique_key in seen_keys:
                         continue
                     # Relevance filter: skip accessories / wrong models.
@@ -166,6 +204,7 @@ class Sniper:
     async def scan_all(self, db: Database) -> tuple[int, int, int]:
         targets = load_targets()
         logger.info("loaded %d targets", len(targets))
+        await self.prefetch_queries(targets)
         s = n = a = 0
         for target in targets:
             try:

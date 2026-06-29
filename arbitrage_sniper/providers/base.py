@@ -83,11 +83,17 @@ class BaseProvider(ABC):
                 return value.value
         return Condition.UNKNOWN.value
 
-    async def _goto(self, page, url: str) -> bool:
+    async def _goto(self, page, url: str, *, fast: bool = False) -> bool:
         """Navigate with a soft failure (returns False instead of raising)."""
         try:
-            await page.goto(url, wait_until="domcontentloaded")
-            await jitter(1.0, 3.0)
+            wait = "commit" if fast else "domcontentloaded"
+            await page.goto(url, wait_until=wait)
+            if settings.is_ci:
+                await jitter(0.5, 1.2)
+            elif fast:
+                await jitter(0.6, 1.5)
+            else:
+                await jitter(1.0, 3.0)
             return True
         except Exception as exc:
             logger.warning("[%s] navigation to %s failed: %s", self.name, url, exc)

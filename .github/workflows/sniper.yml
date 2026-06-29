@@ -26,12 +26,20 @@ jobs:
     # package (libasound2t64) and `playwright install --with-deps` fails with
     # "Package 'libasound2' has no installation candidate".
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
+      CI: "true"
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       EBAY_APP_TOKEN: ${{ secrets.EBAY_APP_TOKEN }}
       HEADLESS: "true"
+      # Faster politeness delays on CI (local default remains 2–6 s).
+      MIN_DELAY: "1"
+      MAX_DELAY: "2.5"
+      # Fewer items per Vinted storefront; merged result still capped at 40.
+      VINTED_PER_STORE: "8"
+      # On CI scan IT/RO + main EU neighbours (faster). Omit locally for all 24.
+      VINTED_MARKETS: "it,ro,fr,de,es,pl,uk,nl,be,pt,at,cz,hu"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -123,6 +123,7 @@ Set secrets/env (see `.env.example`):
 | `FACEBOOK_COOKIES_PATH` | no    | Path to Playwright cookies JSON for FB Marketplace |
 | `VINTED_REGIONS`     | no       | `west`, `east`, or `west,east` (default: both)     |
 | `VINTED_MARKETS`     | no       | Override: comma codes e.g. `it,ro,fr,pl,de`        |
+| `VINTED_PER_STORE`   | no       | Items per Vinted storefront before merge (default 12)|
 | `MPB_MARGIN`         | no       | Trigger margin (default `0.90`)                    |
 | `MIN_DELAY`/`MAX_DELAY` | no    | Random delay between requests (default 2–6 s)      |
 | `HEADLESS`           | no       | `true` in CI, `false` to watch the browser locally |
