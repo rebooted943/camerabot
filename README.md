@@ -277,6 +277,15 @@ Credentials come from **GitHub Secrets** (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
 optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
 `playwright install --with-deps` fails on Ubuntu 24.04 (`libasound2`).
 
+## Docs
+
+- [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — ready-to-use prompt
+  to hand an AI agent so it builds a cross-platform mobile app with full feature
+  parity (plus native push, watchlist, price history, offline, auth).
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — future development plan, including how
+  to generalize the engine beyond photography into other resale verticals
+  (electronics, watches, sneakers, bikes, …).
+
 ## Tests
 
 ```bash
