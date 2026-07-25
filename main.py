@@ -34,7 +34,7 @@ from arbitrage_sniper.config import settings
 from arbitrage_sniper.currency import to_eur
 from arbitrage_sniper.database import Database
 from arbitrage_sniper.matching import is_relevant
-from arbitrage_sniper.models import Alert, Item
+from arbitrage_sniper.models import Alert, Item, price_in_range
 from arbitrage_sniper.notifier import TelegramNotifier
 from arbitrage_sniper.providers import ALL_PROVIDERS
 from arbitrage_sniper.targets import (
@@ -42,6 +42,7 @@ from arbitrage_sniper.targets import (
     add_target,
     list_labels,
     load_targets,
+    range_label,
     remove_target,
 )
 
@@ -174,8 +175,15 @@ class Sniper:
 
         for it in new_items:
             alert = arbitrage.evaluate(
-                it, target_label=target.label, mpb=mpb, ebay=ebay, f64=f64
+                it,
+                target_label=target.label,
+                mpb=mpb,
+                ebay=ebay,
+                f64=f64,
+                price_min=target.price_min,
+                price_max=target.price_max,
             )
+            in_range = price_in_range(it.price, target.price_min, target.price_max)
             if alert:
                 delivered = True
                 if notify and not settings.dry_run:
@@ -196,9 +204,17 @@ class Sniper:
                         it.unique_key,
                     )
             else:
-                # Record even non-triggering ads so they are never re-evaluated
-                # / re-notified on subsequent runs.
-                db.record_item(it)
+                # Record every name-matched ad (even out of range / non-trigger)
+                # so the dashboard can show it and it is not re-evaluated later.
+                db.record_scan(
+                    it,
+                    target_label=target.label,
+                    alerted=False,
+                    in_range=in_range,
+                    mpb_price=mpb.value if mpb.available else None,
+                    ebay_price=ebay.value if ebay.available else None,
+                    f64_price=f64.value if f64.available else None,
+                )
         return result
 
     async def scan_all(self, db: Database) -> tuple[int, int, int]:
@@ -297,8 +313,12 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
         await notifier.send_text(cmd.HELP_TEXT)
 
     elif command.action == "list":
-        labels = list_labels()
-        body = "\n".join(f"{i+1}. {l}" for i, l in enumerate(labels)) or "(none)"
+        targets = load_targets()
+        rows = []
+        for i, t in enumerate(targets):
+            rng = range_label(t.price_min, t.price_max)
+            rows.append(f"{i+1}. {t.label}" + (f"  <code>{rng}</code>" if rng else ""))
+        body = "\n".join(rows) or "(none)"
         await notifier.send_text(f"\U0001F4CB <b>Tracked targets</b>\n{body}")
 
     elif command.action == "add":

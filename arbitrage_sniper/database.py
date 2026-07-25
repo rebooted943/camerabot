@@ -50,6 +50,20 @@ CREATE TABLE IF NOT EXISTS bot_state (
 );
 """
 
+# Columns added after the initial release (applied via ALTER TABLE if missing).
+_MIGRATIONS = {
+    "target_label": "TEXT",
+    "currency": "TEXT",
+    "condition": "TEXT",
+    "image_url": "TEXT",
+    "location": "TEXT",
+    "in_range": "INTEGER",
+    "mpb_price": "REAL",
+    "ebay_price": "REAL",
+    "f64_price": "REAL",
+    "reason": "TEXT",
+}
+
 
 class Database:
     """Thin synchronous wrapper around sqlite3 (fast enough for this workload)."""
@@ -59,7 +73,16 @@ class Database:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        existing = {r[1] for r in self.conn.execute("PRAGMA table_info(seen_ads)")}
+        for column, coltype in _MIGRATIONS.items():
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE seen_ads ADD COLUMN {column} {coltype}")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_seen_target ON seen_ads(target_label)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_seen_last ON seen_ads(last_seen)")
 
     # ------------------------------------------------------------------ #
     # de-duplication
@@ -78,18 +101,48 @@ class Database:
                 new.append(item)
         return new
 
-    def record_item(self, item: Item, *, alerted: bool = False, safe_gain: float | None = None) -> None:
+    def record_scan(
+        self,
+        item: Item,
+        *,
+        target_label: str | None = None,
+        alerted: bool = False,
+        in_range: bool | None = None,
+        safe_gain: float | None = None,
+        mpb_price: float | None = None,
+        ebay_price: float | None = None,
+        f64_price: float | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Upsert a scanned (name-matched) listing with full context.
+
+        Stored regardless of whether it triggered an alert, so the dashboard can
+        show everything that matched by name — including out-of-range items.
+        """
         now = int(time.time())
         self.conn.execute(
             """
             INSERT INTO seen_ads
-                (unique_key, platform, ad_id, title, price, link, alerted, safe_gain, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (unique_key, platform, ad_id, title, price, link, alerted, safe_gain,
+                 target_label, currency, condition, image_url, location,
+                 in_range, mpb_price, ebay_price, f64_price, reason,
+                 first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(unique_key) DO UPDATE SET
-                last_seen = excluded.last_seen,
-                price     = excluded.price,
-                alerted   = MAX(seen_ads.alerted, excluded.alerted),
-                safe_gain = COALESCE(excluded.safe_gain, seen_ads.safe_gain)
+                last_seen    = excluded.last_seen,
+                price        = excluded.price,
+                alerted      = MAX(seen_ads.alerted, excluded.alerted),
+                safe_gain    = COALESCE(excluded.safe_gain, seen_ads.safe_gain),
+                target_label = COALESCE(excluded.target_label, seen_ads.target_label),
+                currency     = COALESCE(excluded.currency, seen_ads.currency),
+                condition    = COALESCE(excluded.condition, seen_ads.condition),
+                image_url    = COALESCE(excluded.image_url, seen_ads.image_url),
+                location     = COALESCE(excluded.location, seen_ads.location),
+                in_range     = COALESCE(excluded.in_range, seen_ads.in_range),
+                mpb_price    = COALESCE(excluded.mpb_price, seen_ads.mpb_price),
+                ebay_price   = COALESCE(excluded.ebay_price, seen_ads.ebay_price),
+                f64_price    = COALESCE(excluded.f64_price, seen_ads.f64_price),
+                reason       = COALESCE(excluded.reason, seen_ads.reason)
             """,
             (
                 item.unique_key,
@@ -100,14 +153,38 @@ class Database:
                 item.link,
                 1 if alerted else 0,
                 safe_gain,
+                target_label,
+                item.currency,
+                item.condition,
+                item.image_url,
+                item.location,
+                None if in_range is None else (1 if in_range else 0),
+                mpb_price,
+                ebay_price,
+                f64_price,
+                reason,
                 now,
                 now,
             ),
         )
         self.conn.commit()
 
+    def record_item(self, item: Item, *, alerted: bool = False, safe_gain: float | None = None) -> None:
+        # Backwards-compatible thin wrapper.
+        self.record_scan(item, alerted=alerted, safe_gain=safe_gain)
+
     def record_alert(self, alert: Alert) -> None:
-        self.record_item(alert.item, alerted=True, safe_gain=alert.safe_gain)
+        self.record_scan(
+            alert.item,
+            target_label=alert.target_label,
+            alerted=True,
+            in_range=alert.in_range,
+            safe_gain=alert.safe_gain,
+            mpb_price=alert.mpb_price,
+            ebay_price=alert.ebay_price,
+            f64_price=alert.f64_price,
+            reason=alert.reason,
+        )
 
     def clear_seen(self, like: str | None = None) -> int:
         """Forget previously-seen ads so the next scan re-notifies them.
@@ -169,7 +246,105 @@ class Database:
     def stats(self) -> dict:
         total = self.conn.execute("SELECT COUNT(*) FROM seen_ads").fetchone()[0]
         alerted = self.conn.execute("SELECT COUNT(*) FROM seen_ads WHERE alerted = 1").fetchone()[0]
-        return {"total_seen": total, "total_alerted": alerted}
+        in_range = self.conn.execute(
+            "SELECT COUNT(*) FROM seen_ads WHERE in_range = 1"
+        ).fetchone()[0]
+        return {"total_seen": total, "total_alerted": alerted, "total_in_range": in_range}
+
+    # ------------------------------------------------------------------ #
+    # read API for the web dashboard
+    # ------------------------------------------------------------------ #
+    def _build_filters(
+        self,
+        *,
+        target: str | None,
+        in_range: bool | None,
+        alerted: bool | None,
+        platform: str | None,
+        q: str | None,
+    ) -> tuple[str, list]:
+        clauses: list[str] = []
+        params: list = []
+        if target:
+            clauses.append("target_label = ?")
+            params.append(target)
+        if in_range is not None:
+            clauses.append("in_range = ?")
+            params.append(1 if in_range else 0)
+        if alerted is not None:
+            clauses.append("alerted = ?")
+            params.append(1 if alerted else 0)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if q:
+            clauses.append("lower(title) LIKE ?")
+            params.append(f"%{q.lower()}%")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, params
+
+    _SORT_COLUMNS = {
+        "last_seen": "last_seen",
+        "first_seen": "first_seen",
+        "price": "price",
+        "safe_gain": "safe_gain",
+    }
+
+    def list_items(
+        self,
+        *,
+        target: str | None = None,
+        in_range: bool | None = None,
+        alerted: bool | None = None,
+        platform: str | None = None,
+        q: str | None = None,
+        sort: str = "last_seen",
+        descending: bool = True,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict]:
+        where, params = self._build_filters(
+            target=target, in_range=in_range, alerted=alerted, platform=platform, q=q
+        )
+        col = self._SORT_COLUMNS.get(sort, "last_seen")
+        direction = "DESC" if descending else "ASC"
+        sql = (
+            "SELECT unique_key, platform, ad_id, title, price, link, alerted, safe_gain, "
+            "target_label, currency, condition, image_url, location, in_range, "
+            "mpb_price, ebay_price, f64_price, reason, first_seen, last_seen "
+            f"FROM seen_ads{where} ORDER BY {col} {direction} LIMIT ? OFFSET ?"
+        )
+        rows = self.conn.execute(sql, (*params, int(limit), int(offset))).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_items(
+        self,
+        *,
+        target: str | None = None,
+        in_range: bool | None = None,
+        alerted: bool | None = None,
+        platform: str | None = None,
+        q: str | None = None,
+    ) -> int:
+        where, params = self._build_filters(
+            target=target, in_range=in_range, alerted=alerted, platform=platform, q=q
+        )
+        return self.conn.execute(
+            f"SELECT COUNT(*) FROM seen_ads{where}", params
+        ).fetchone()[0]
+
+    def distinct_targets(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT target_label FROM seen_ads "
+            "WHERE target_label IS NOT NULL AND target_label != '' ORDER BY target_label"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def distinct_platforms(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT platform FROM seen_ads ORDER BY platform"
+        ).fetchall()
+        return [r[0] for r in rows]
 
     def close(self) -> None:
         try:

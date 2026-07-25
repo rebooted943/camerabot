@@ -64,19 +64,24 @@ and `a7` never matches `a7r`.
 │       └── ci.yml                   # runs pytest on push/PR
 ├── tests/
 │   ├── test_arbitrage.py            # pure trigger/spread logic
-│   └── test_matching.py             # relevance + gain cap + aggregation
+│   ├── test_matching.py             # relevance + gain cap + aggregation
+│   └── test_pricerange.py           # price windows + range alerts + dashboard DB API
 └── arbitrage_sniper/
     ├── __init__.py
     ├── config.py                    # env-driven settings
     ├── models.py                    # Item / Benchmark / Alert dataclasses + parsers
     ├── matching.py                  # relevance matching (accessories/wrong models)
-    ├── targets.py                   # Target model + thresholds.json add/remove/list
+    ├── targets.py                   # Target model (incl. price windows) + thresholds CRUD
     ├── commands.py                  # Telegram command parser
     ├── currency.py                  # RON/USD/GBP → EUR normalisation
     ├── browser.py                   # async Playwright + stealth + UA rotation + jitter
     ├── database.py                  # SQLite manager (seen_ads + run_log + bot_state)
     ├── arbitrage.py                 # core trigger + spread calculation (pure)
     ├── notifier.py                  # Telegram HTML notifier + getUpdates
+    ├── web/                         # local dashboard (FastAPI + vanilla-JS SPA)
+    │   ├── app.py                   # REST API: targets CRUD + scanned items + stats
+    │   ├── __main__.py              # `python -m arbitrage_sniper.web`
+    │   └── static/                  # index.html + styles.css + app.js
     ├── providers/                   # BUY side (Italy + Romania only)
     │   ├── base.py
     │   ├── subito.py                # subito.it
@@ -142,6 +147,36 @@ python main.py --dry-run   # sends a Telegram ping and exits
 python main.py             # full scan
 ```
 
+## Web dashboard
+
+A local control panel (FastAPI + a dependency-free SPA) over the same
+`thresholds.json` and `seen_ads.db` the scanner uses. It lets you:
+
+- **add / remove targets**, each with an optional **price window** (min / max EUR);
+- **edit the price range** of an existing target inline;
+- **browse every scanned listing** that matched a target *by name* — including
+  the ones **outside** the price window — with filters for target, platform,
+  in/out of range, alerted-only, free-text search and sorting.
+
+```bash
+python -m pip install -r requirements.txt
+python -m arbitrage_sniper.web          # http://127.0.0.1:8000
+# or: uvicorn arbitrage_sniper.web.app:app --reload
+```
+
+Because scans run in GitHub Actions and commit `seen_ads.db` + `thresholds.json`
+back to the repo, `git pull` to refresh the dashboard with the latest results,
+and commit after editing targets so the next scheduled scan picks them up.
+
+### Price windows
+
+A target may define a price window (`price_min` / `price_max`). When set, it
+becomes the alert gate: you're notified when a name-matched listing falls
+**inside** the window (MPB / eBay / F64 are still attached for context). When no
+window is set, the original MPB risk-zero trigger applies. Every name-matched
+listing is stored regardless, so out-of-range items still show up in the
+dashboard.
+
 ## Telegram commands
 
 Send these messages to the bot; the `commands.yml` poller (cron `*/5`) picks
@@ -152,7 +187,7 @@ them up and replies in chat:
 | `/scan`                  | Run a full scan of all tracked targets now               |
 | `/scan <query>`          | One-off scan for a query, e.g. `/scan fujifilm x-t50`    |
 | `/search <query>`        | Alias of `/scan <query>`                                 |
-| `/add <query>`           | Add a target to the watch list (persisted + committed)   |
+| `/add <query> [min-max]` | Add a target with optional price window, e.g. `/add Sony A7 III 400-700` or `/add Canon R6 <900` |
 | `/remove <query \| #>`   | Remove a target by name or list index                    |
 | `/list`                  | Show tracked targets                                     |
 | `/clear [query]`         | Forget seen ads (all, or matching a query) so the next scan re-notifies them |

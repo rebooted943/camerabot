@@ -14,3 +14,7 @@ selectolax==0.3.21
 # Config / models / utils
 python-dotenv==1.0.1
 tenacity==8.3.0
+
+# Web dashboard (local UI to manage targets and browse scanned items)
+fastapi==0.111.0
+uvicorn[standard]==0.30.1

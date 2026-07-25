@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ArbitrageSniper</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎯</span>
+      <div>
+        <h1>ArbitrageSniper</h1>
+        <p class="tagline">Used-gear deal scanner &middot; control panel</p>
+      </div>
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat"><span class="stat-num" id="stat-targets">–</span><span class="stat-label">targets</span></div>
+      <div class="stat"><span class="stat-num" id="stat-seen">–</span><span class="stat-label">scanned</span></div>
+      <div class="stat"><span class="stat-num" id="stat-inrange">–</span><span class="stat-label">in range</span></div>
+      <div class="stat"><span class="stat-num" id="stat-alerts">–</span><span class="stat-label">alerts</span></div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- Targets manager -->
+    <aside class="panel targets-panel">
+      <h2>Targets</h2>
+      <form id="add-form" class="add-form">
+        <input id="add-query" type="text" placeholder="e.g. Fujifilm X-T50" required autocomplete="off" />
+        <div class="range-row">
+          <input id="add-min" type="number" min="0" step="1" placeholder="min €" />
+          <span class="dash">–</span>
+          <input id="add-max" type="number" min="0" step="1" placeholder="max €" />
+        </div>
+        <button type="submit" class="btn primary">Add target</button>
+        <p class="hint">Price window is optional. When set, you're alerted when a name-matched listing falls inside it.</p>
+      </form>
+      <div id="targets-list" class="targets-list"></div>
+    </aside>
+
+    <!-- Scanned items -->
+    <section class="panel items-panel">
+      <div class="items-header">
+        <h2>Scanned items</h2>
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Search title…" />
+          <select id="filter-target"><option value="">All targets</option></select>
+          <select id="filter-platform"><option value="">All platforms</option></select>
+          <select id="filter-range">
+            <option value="">In &amp; out of range</option>
+            <option value="true">In range only</option>
+            <option value="false">Out of range only</option>
+          </select>
+          <label class="check"><input type="checkbox" id="filter-alerted" /> Alerted</label>
+          <select id="sort">
+            <option value="last_seen">Newest</option>
+            <option value="price">Cheapest</option>
+            <option value="safe_gain">Best gain</option>
+          </select>
+          <button id="refresh" class="btn ghost" title="Refresh">↻</button>
+        </div>
+      </div>
+      <div id="items-meta" class="items-meta"></div>
+      <div id="items" class="items-grid"></div>
+      <div id="empty" class="empty hidden">No scanned items match these filters yet.</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

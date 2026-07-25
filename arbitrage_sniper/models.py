@@ -144,20 +144,24 @@ class Alert:
 
     item: Item
     target_label: str
-    mpb_price: float
+    mpb_price: Optional[float]
     ebay_price: Optional[float]
     f64_price: Optional[float]
     margin_used: float
+    in_range: bool = True
+    reason: str = "mpb"  # "mpb" (risk-zero trigger) or "range" (price window)
 
     @property
-    def safe_gain(self) -> float:
-        """Risk-zero gain = MPB floor price - purchase price."""
+    def safe_gain(self) -> Optional[float]:
+        """Risk-zero gain = MPB floor price - purchase price (None if no MPB)."""
+        if self.mpb_price is None:
+            return None
         return round(self.mpb_price - self.item.price, 2)
 
     @property
-    def safe_gain_pct(self) -> float:
-        if self.item.price <= 0:
-            return 0.0
+    def safe_gain_pct(self) -> Optional[float]:
+        if self.mpb_price is None or self.item.price <= 0:
+            return None
         return round((self.safe_gain / self.item.price) * 100, 1)
 
     @property
@@ -170,6 +174,17 @@ class Alert:
     @property
     def red_flags(self) -> list[str]:
         return self.item.red_flags()
+
+
+def price_in_range(price: float, price_min: Optional[float], price_max: Optional[float]) -> bool:
+    """True if price is within [min, max]. Unset bounds are treated as open."""
+    if price is None:
+        return False
+    if price_min is not None and price < price_min:
+        return False
+    if price_max is not None and price > price_max:
+        return False
+    return True
 
 
 _PRICE_RE = re.compile(r"[-+]?\d[\d.\s,]*")
