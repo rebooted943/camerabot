@@ -24,10 +24,27 @@
     </div>
   </header>
 
+  <div id="banner" class="banner hidden"></div>
+
   <main class="layout">
     <!-- Targets manager -->
     <aside class="panel targets-panel">
-      <h2>Targets</h2>
+      <section id="scan-section" class="scan-section">
+        <h2>Scan</h2>
+        <div class="scan-mode">
+          <label class="radio"><input type="radio" name="scan-mode" value="all" checked /> All targets</label>
+          <label class="radio"><input type="radio" name="scan-mode" value="query" /> Query</label>
+        </div>
+        <input id="scan-query" type="text" placeholder="one-off query (optional)" autocomplete="off" class="hidden" />
+        <button id="scan-now" class="btn primary scan-btn">▶ Scan now</button>
+        <div id="scan-status" class="scan-status hidden"></div>
+
+        <h3 class="sub">Sources</h3>
+        <p class="hint">Only checked sites are scraped — fewer sources = faster scans.</p>
+        <div id="providers-list" class="providers-list"></div>
+      </section>
+
+      <h2 class="mt">Targets</h2>
       <form id="add-form" class="add-form">
         <input id="add-query" type="text" placeholder="e.g. Fujifilm X-T50" required autocomplete="off" />
         <div class="range-row">

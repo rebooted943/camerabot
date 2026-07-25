@@ -18,15 +18,20 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..config import settings
 from ..database import Database
+from ..providers import ALL_PROVIDERS
 from ..targets import (
     Target,
     add_target,
+    get_enabled_providers,
     load_targets,
     range_label,
     remove_target,
+    set_enabled_providers,
     update_target,
 )
+from .scan_runner import runner
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -51,6 +56,16 @@ class TargetUpdate(BaseModel):
     # Explicit "clear the field" support: send these to null them out.
     clear_price_min: bool = False
     clear_price_max: bool = False
+
+
+class ProvidersUpdate(BaseModel):
+    enabled: Optional[list[str]] = None  # None/empty => all enabled
+
+
+class ScanRequest(BaseModel):
+    mode: str = "all"  # "all" | "query"
+    query: Optional[str] = None
+    providers: Optional[list[str]] = None  # None => use enabled set
 
 
 # --------------------------------------------------------------------------- #
@@ -174,6 +189,51 @@ def stats() -> dict:
         db.close()
     s["total_targets"] = len(load_targets())
     return s
+
+
+# --------------------------------------------------------------------------- #
+# API: providers + on-demand scan
+# --------------------------------------------------------------------------- #
+def _provider_available(name: str) -> bool:
+    if name == "facebook":
+        return bool(settings.facebook_cookies_path)
+    return True
+
+
+@app.get("/api/providers")
+def list_providers() -> dict:
+    enabled = get_enabled_providers()  # None => all enabled
+    out = []
+    for p in ALL_PROVIDERS:
+        out.append({
+            "name": p.name,
+            "label": getattr(p, "label", p.name),
+            "available": _provider_available(p.name),
+            "enabled": True if enabled is None else (p.name in enabled),
+        })
+    return {"providers": out}
+
+
+@app.post("/api/providers")
+def update_providers(payload: ProvidersUpdate) -> dict:
+    changed, msg = set_enabled_providers(payload.enabled)
+    return {"ok": changed, "message": msg}
+
+
+@app.post("/api/scan", status_code=202)
+async def start_scan(payload: ScanRequest) -> dict:
+    # async so runner.start() can schedule the background task on the running loop.
+    ok, msg = runner.start(
+        mode=payload.mode, query=payload.query, providers=payload.providers
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail=msg)
+    return {"ok": True, "message": msg, "status": runner.snapshot()}
+
+
+@app.get("/api/scan")
+def scan_status() -> dict:
+    return runner.snapshot()
 
 
 @app.post("/api/clear")

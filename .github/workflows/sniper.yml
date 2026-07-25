@@ -10,6 +10,14 @@ on:
         description: "Send a Telegram ping and exit (no scraping)"
         type: boolean
         default: false
+      query:
+        description: "Optional one-off query to scan instead of all targets"
+        type: string
+        required: false
+      providers:
+        description: "Optional comma-separated sources (e.g. subito,vinted). Empty = enabled set"
+        type: string
+        required: false
 
 # Allow the job to push the updated SQLite DB back to the repo.
 permissions:
@@ -59,11 +67,17 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Run ArbitrageSniper
+        env:
+          SNIPE_QUERY: ${{ github.event.inputs.query }}
+          SNIPE_PROVIDERS: ${{ github.event.inputs.providers }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             python main.py --dry-run
           else
-            python main.py --summary
+            ARGS="--summary"
+            if [ -n "$SNIPE_QUERY" ]; then ARGS="$ARGS --query \"$SNIPE_QUERY\""; fi
+            if [ -n "$SNIPE_PROVIDERS" ]; then ARGS="$ARGS --providers \"$SNIPE_PROVIDERS\""; fi
+            eval python main.py $ARGS
           fi
 
       - name: Commit updated database

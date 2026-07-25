@@ -153,6 +153,34 @@ def list_labels(path: Path | str = THRESHOLDS_PATH) -> list[str]:
     return [t.label for t in load_targets(path)]
 
 
+def get_enabled_providers(path: Path | str = THRESHOLDS_PATH) -> list[str] | None:
+    """Return the persisted enabled-provider names, or None (= all enabled)."""
+    try:
+        data = _load_raw(path)
+    except (OSError, ValueError):
+        return None
+    node = data.get("providers") or {}
+    enabled = node.get("enabled")
+    if isinstance(enabled, list) and enabled:
+        return [str(x) for x in enabled]
+    return None
+
+
+def set_enabled_providers(
+    names: list[str] | None, path: Path | str = THRESHOLDS_PATH
+) -> tuple[bool, str]:
+    """Persist the set of enabled providers. Empty/None -> all enabled."""
+    data = _load_raw(path)
+    node = data.setdefault("providers", {})
+    if not names:
+        node.pop("enabled", None)
+        _save_raw(data, path)
+        return True, "all providers enabled"
+    node["enabled"] = [str(n) for n in names]
+    _save_raw(data, path)
+    return True, f"enabled {len(names)} provider(s)"
+
+
 _RANGE_RE = re.compile(
     r"""(?:^|\s)
         (?:

@@ -36,10 +36,11 @@ from arbitrage_sniper.database import Database
 from arbitrage_sniper.matching import is_relevant
 from arbitrage_sniper.models import Alert, Item, price_in_range
 from arbitrage_sniper.notifier import TelegramNotifier
-from arbitrage_sniper.providers import ALL_PROVIDERS
+from arbitrage_sniper.providers import ALL_PROVIDERS, resolve_providers
 from arbitrage_sniper.targets import (
     Target,
     add_target,
+    get_enabled_providers,
     list_labels,
     load_targets,
     range_label,
@@ -74,9 +75,14 @@ def normalise_to_eur(item: Item) -> Item:
 
 
 class Sniper:
-    def __init__(self, browser: BrowserManager) -> None:
+    def __init__(self, browser: BrowserManager, provider_names: list[str] | None = None) -> None:
         self.browser = browser
-        self.providers = [P(browser) for P in ALL_PROVIDERS]
+        # Explicit selection wins; otherwise fall back to the persisted set of
+        # enabled providers; otherwise all providers.
+        selection = provider_names if provider_names is not None else get_enabled_providers()
+        classes = resolve_providers(selection)
+        self.providers = [P(browser) for P in classes]
+        logger.info("providers active: %s", [p.name for p in self.providers])
         self.mpb = MpbBenchmark(browser)
         self.ebay = EbayBenchmark(browser)
         self.f64 = F64Benchmark(browser)
@@ -376,6 +382,8 @@ async def amain(args: argparse.Namespace) -> int:
         logger.info("dry-run ping sent=%s", ok)
         return 0
 
+    providers = _parse_providers(getattr(args, "providers", None))
+
     db = Database()
     run_id = db.start_run()
     scanned = new_ads = alerts = 0
@@ -390,7 +398,7 @@ async def amain(args: argparse.Namespace) -> int:
                 logger.info("listen: no commands")
             elif _needs_browser(pending):
                 async with BrowserManager() as browser:
-                    sniper = Sniper(browser)
+                    sniper = Sniper(browser, provider_names=providers)
                     for command in pending:
                         await _safe_dispatch(command, notifier, db, sniper)
             else:
@@ -398,13 +406,13 @@ async def amain(args: argparse.Namespace) -> int:
                     await _safe_dispatch(command, notifier, db, None)
         elif args.query:
             async with BrowserManager() as browser:
-                sniper = Sniper(browser)
+                sniper = Sniper(browser, provider_names=providers)
                 result = await sniper.scan_query(args.query, db)
                 scanned, new_ads, alerts = result.scanned, result.new_ads, len(result.alerts)
                 await notifier.send_text(_render_adhoc_reply(result))
         else:
             async with BrowserManager() as browser:
-                sniper = Sniper(browser)
+                sniper = Sniper(browser, provider_names=providers)
                 scanned, new_ads, alerts = await sniper.scan_all(db)
                 if args.summary and not settings.dry_run:
                     await notifier.send_summary(scanned=scanned, new_ads=new_ads, alerts=alerts)
@@ -413,6 +421,14 @@ async def amain(args: argparse.Namespace) -> int:
         logger.info("run done | scanned=%d new=%d alerts=%d | %s", scanned, new_ads, alerts, db.stats())
         db.close()
     return 0
+
+
+def _parse_providers(raw: str | None) -> list[str] | None:
+    """Parse a comma/space-separated provider list from the CLI (None = default)."""
+    if not raw:
+        return None
+    names = [p.strip().lower() for p in raw.replace(",", " ").split() if p.strip()]
+    return names or None
 
 
 async def _safe_dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Database, sniper: "Sniper | None") -> None:
@@ -429,6 +445,11 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="send a run summary to Telegram")
     parser.add_argument("--listen", action="store_true", help="process pending Telegram commands")
     parser.add_argument("--query", metavar="Q", help="run a one-off scan for a single query")
+    parser.add_argument(
+        "--providers",
+        metavar="LIST",
+        help="comma/space-separated provider names to use (default: enabled set / all)",
+    )
     args = parser.parse_args()
     try:
         return asyncio.run(amain(args))

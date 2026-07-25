@@ -173,6 +173,36 @@ body {
 .empty { text-align: center; color: var(--text-dim); padding: 50px 0; }
 .hidden { display: none !important; }
 
+/* Banner (read-only / online mode) */
+.banner {
+  margin: 0 26px; margin-top: 14px;
+  background: rgba(255, 176, 32, 0.12); border: 1px solid rgba(255, 176, 32, 0.4);
+  color: var(--warn); padding: 10px 16px; border-radius: 10px; font-size: 13px;
+}
+
+/* Scan + sources */
+.scan-section { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 4px; }
+.scan-section h2 { margin-bottom: 10px; }
+.sub { font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px; margin: 16px 0 6px; }
+.mt { margin-top: 18px; }
+.scan-mode { display: flex; gap: 14px; margin-bottom: 10px; }
+.radio { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+#scan-query { width: 100%; margin-bottom: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.scan-btn { width: 100%; }
+.scan-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.scan-status { margin-top: 10px; font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--bg-elev-2); border: 1px solid var(--border); }
+.scan-status.running { border-color: var(--accent); color: var(--accent); }
+.scan-status.done { border-color: var(--accent-2); color: var(--accent-2); }
+.scan-status.error { border-color: var(--danger); color: var(--danger); }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 6px; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.providers-list { display: flex; flex-direction: column; gap: 6px; }
+.provider-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--bg-elev-2); border: 1px solid var(--border); }
+.provider-row label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
+.provider-row.disabled { opacity: 0.55; }
+.provider-tag { margin-left: auto; font-size: 10px; color: var(--warn); text-transform: uppercase; letter-spacing: 0.4px; }
+
 /* Toast */
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
