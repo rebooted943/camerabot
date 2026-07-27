@@ -279,6 +279,8 @@ optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
 
 ## Docs
 
+- [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md) — enable Pages, fix the
+  `main is not allowed to deploy` environment error, verify the site is live.
 - [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — ready-to-use prompt
   to hand an AI agent so it builds a cross-platform mobile app with full feature
   parity (plus native push, watchlist, price history, offline, auth).
