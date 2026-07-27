@@ -51,18 +51,20 @@ def render_alert(alert: Alert) -> str:
 
     lines.append(f"\U0001F4B0 <b>Buy price:</b> {_fmt_money(item.price, item.currency)}")
 
-    # Safety / risk-zero gain (MPB floor).
-    safe_pct = f" (+{alert.safe_gain_pct:.0f}%)" if alert.safe_gain_pct else ""
-    lines.append(
-        f"\U0001F6E1 <b>MPB floor:</b> {_fmt_money(alert.mpb_price)} \u2192 "
-        f"risk-zero gain <b>{_fmt_money(alert.safe_gain)}</b>{safe_pct}"
-    )
+    # Safety / risk-zero gain (MPB floor) — only when we have an MPB reference.
+    if alert.mpb_price is not None:
+        safe_pct = f" (+{alert.safe_gain_pct:.0f}%)" if alert.safe_gain_pct else ""
+        lines.append(
+            f"\U0001F6E1 <b>MPB floor:</b> {_fmt_money(alert.mpb_price)} \u2192 "
+            f"risk-zero gain <b>{_fmt_money(alert.safe_gain)}</b>{safe_pct}"
+        )
 
     # Retail / potential gain (eBay sold + F64).
     if alert.ebay_price is not None:
+        potential = _fmt_money(alert.potential_gain) if alert.potential_gain is not None else "n/a"
         lines.append(
             f"\U0001F4C8 <b>eBay sold avg:</b> {_fmt_money(alert.ebay_price)} \u2192 "
-            f"max gain <b>{_fmt_money(alert.potential_gain)}</b>"
+            f"max gain <b>{potential}</b>"
         )
     if alert.f64_price is not None:
         lines.append(f"\U0001F3EC <b>F64 used:</b> {_fmt_money(alert.f64_price)}")
@@ -73,7 +75,12 @@ def render_alert(alert: Alert) -> str:
         lines.append("\u26A0\uFE0F <b>Red flags:</b> " + ", ".join(_esc(f) for f in flags))
 
     lines.append("")
-    lines.append(f"<i>target: {_esc(alert.target_label)} \u00b7 margin {alert.margin_used:.0%}</i>")
+    if alert.reason == "range":
+        lines.append(f"<i>target: {_esc(alert.target_label)} \u00b7 matched price window</i>")
+    else:
+        lines.append(
+            f"<i>target: {_esc(alert.target_label)} \u00b7 margin {alert.margin_used:.0%}</i>"
+        )
     return "\n".join(lines)
 
 

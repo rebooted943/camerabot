@@ -59,24 +59,33 @@ and `a7` never matches `a7r`.
 │   └── get_chat_id.py               # helper to discover TELEGRAM_CHAT_ID
 ├── .github/
 │   └── workflows/
-│       ├── sniper.yml               # scheduled scan (cron */15)
+│       ├── sniper.yml               # scheduled scan (cron */15) + dispatch query/providers
 │       ├── commands.yml             # Telegram command poller (cron */5)
+│       ├── pages.yml                # publish read-only dashboard to GitHub Pages
 │       └── ci.yml                   # runs pytest on push/PR
 ├── tests/
 │   ├── test_arbitrage.py            # pure trigger/spread logic
-│   └── test_matching.py             # relevance + gain cap + aggregation
+│   ├── test_matching.py             # relevance + gain cap + aggregation
+│   ├── test_pricerange.py           # price windows + range alerts + dashboard DB API
+│   └── test_providers.py            # source selection (enabled set + resolution)
 └── arbitrage_sniper/
     ├── __init__.py
     ├── config.py                    # env-driven settings
     ├── models.py                    # Item / Benchmark / Alert dataclasses + parsers
     ├── matching.py                  # relevance matching (accessories/wrong models)
-    ├── targets.py                   # Target model + thresholds.json add/remove/list
+    ├── targets.py                   # Target model (incl. price windows) + thresholds CRUD
     ├── commands.py                  # Telegram command parser
     ├── currency.py                  # RON/USD/GBP → EUR normalisation
     ├── browser.py                   # async Playwright + stealth + UA rotation + jitter
     ├── database.py                  # SQLite manager (seen_ads + run_log + bot_state)
     ├── arbitrage.py                 # core trigger + spread calculation (pure)
     ├── notifier.py                  # Telegram HTML notifier + getUpdates
+    ├── web/                         # dashboard (FastAPI + vanilla-JS SPA)
+    │   ├── app.py                   # REST API: targets CRUD, items, providers, scan
+    │   ├── scan_runner.py           # background "Scan now" runner
+    │   ├── export.py                # snapshot exporter for the GitHub Pages site
+    │   ├── __main__.py              # `python -m arbitrage_sniper.web`
+    │   └── static/                  # index.html + styles.css + app.js (dual live/static)
     ├── providers/                   # BUY side (Italy + Romania only)
     │   ├── base.py
     │   ├── subito.py                # subito.it
@@ -142,6 +151,63 @@ python main.py --dry-run   # sends a Telegram ping and exits
 python main.py             # full scan
 ```
 
+## Web dashboard
+
+A local control panel (FastAPI + a dependency-free SPA) over the same
+`thresholds.json` and `seen_ads.db` the scanner uses. It lets you:
+
+- **add / remove targets**, each with an optional **price window** (min / max EUR);
+- **edit the price range** of an existing target inline;
+- **browse every scanned listing** that matched a target *by name* — including
+  the ones **outside** the price window — with filters for target, platform,
+  in/out of range, alerted-only, free-text search and sorting;
+- **Scan now** — trigger a scan on demand (all targets or a one-off query);
+- **pick sources** — check only the sites you want scraped, so a scan can hit a
+  single marketplace and finish faster (the choice is persisted and also used by
+  the scheduled Action).
+
+```bash
+python -m pip install -r requirements.txt
+python -m playwright install chromium   # required for "Scan now"
+python -m arbitrage_sniper.web          # http://127.0.0.1:8000
+# or: uvicorn arbitrage_sniper.web.app:app --reload
+```
+
+Because scans run in GitHub Actions and commit `seen_ads.db` + `thresholds.json`
+back to the repo, `git pull` to refresh the dashboard with the latest results,
+and commit after editing targets so the next scheduled scan picks them up.
+
+### Online (GitHub Pages)
+
+The same SPA is published **read-only** to GitHub Pages by `.github/workflows/pages.yml`:
+after each scan it exports a `data.json` snapshot from `seen_ads.db` +
+`thresholds.json` and deploys the site, so results are viewable from anywhere
+with no backend. The page auto-detects it has no API and hides the write/scan
+controls. Enable it once under **Settings → Pages → Source: GitHub Actions**.
+
+To scan on demand *from GitHub* (no local machine), use **Actions → ArbitrageSniper
+→ Run workflow**, optionally passing a `query` and/or `providers`
+(e.g. `subito,vinted`) — the Pages site republishes automatically afterwards.
+
+### Selecting sources
+
+Enabled providers are stored in `thresholds.json` under `providers.enabled`
+(absent ⇒ all enabled). Toggle them from the dashboard, via the API, or by
+editing the file:
+
+```json
+{ "providers": { "enabled": ["subito", "vinted"] } }
+```
+
+### Price windows
+
+A target may define a price window (`price_min` / `price_max`). When set, it
+becomes the alert gate: you're notified when a name-matched listing falls
+**inside** the window (MPB / eBay / F64 are still attached for context). When no
+window is set, the original MPB risk-zero trigger applies. Every name-matched
+listing is stored regardless, so out-of-range items still show up in the
+dashboard.
+
 ## Telegram commands
 
 Send these messages to the bot; the `commands.yml` poller (cron `*/5`) picks
@@ -152,7 +218,7 @@ them up and replies in chat:
 | `/scan`                  | Run a full scan of all tracked targets now               |
 | `/scan <query>`          | One-off scan for a query, e.g. `/scan fujifilm x-t50`    |
 | `/search <query>`        | Alias of `/scan <query>`                                 |
-| `/add <query>`           | Add a target to the watch list (persisted + committed)   |
+| `/add <query> [min-max]` | Add a target with optional price window, e.g. `/add Sony A7 III 400-700` or `/add Canon R6 <900` |
 | `/remove <query \| #>`   | Remove a target by name or list index                    |
 | `/list`                  | Show tracked targets                                     |
 | `/clear [query]`         | Forget seen ads (all, or matching a query) so the next scan re-notifies them |
@@ -210,6 +276,15 @@ python main.py --listen                 # process pending Telegram commands
 Credentials come from **GitHub Secrets** (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`,
 optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
 `playwright install --with-deps` fails on Ubuntu 24.04 (`libasound2`).
+
+## Docs
+
+- [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — ready-to-use prompt
+  to hand an AI agent so it builds a cross-platform mobile app with full feature
+  parity (plus native push, watchlist, price history, offline, auth).
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — future development plan, including how
+  to generalize the engine beyond photography into other resale verticals
+  (electronics, watches, sneakers, bikes, …).
 
 ## Tests
 

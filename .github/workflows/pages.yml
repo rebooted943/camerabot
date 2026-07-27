@@ -1,0 +1,65 @@
+name: Publish dashboard (Pages)
+
+# Publishes the read-only dashboard to GitHub Pages. It bundles the SPA and a
+# data.json snapshot exported from seen_ads.db + thresholds.json, so results are
+# viewable online from anywhere (no backend). Re-runs after each scan.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "arbitrage_sniper/web/static/**"
+      - "seen_ads.db"
+      - "thresholds.json"
+      - ".github/workflows/pages.yml"
+  # Republish right after a scheduled/dispatched scan commits fresh data.
+  workflow_run:
+    workflows: ["ArbitrageSniper"]
+    types: ["completed"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one concurrent Pages deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (for the exporter)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build static site
+        run: |
+          mkdir -p site
+          cp -r arbitrage_sniper/web/static/* site/
+          # Export a JSON snapshot from the committed DB (best-effort).
+          python -m arbitrage_sniper.web.export site/data.json --limit 500 || \
+            echo '{"readonly":true,"stats":{},"targets":[],"providers":[],"filters":{"targets":[],"platforms":[]},"items":[]}' > site/data.json
+          touch site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

@@ -34,14 +34,16 @@ from arbitrage_sniper.config import settings
 from arbitrage_sniper.currency import to_eur
 from arbitrage_sniper.database import Database
 from arbitrage_sniper.matching import is_relevant
-from arbitrage_sniper.models import Alert, Item
+from arbitrage_sniper.models import Alert, Item, price_in_range
 from arbitrage_sniper.notifier import TelegramNotifier
-from arbitrage_sniper.providers import ALL_PROVIDERS
+from arbitrage_sniper.providers import ALL_PROVIDERS, resolve_providers
 from arbitrage_sniper.targets import (
     Target,
     add_target,
+    get_enabled_providers,
     list_labels,
     load_targets,
+    range_label,
     remove_target,
 )
 
@@ -73,9 +75,14 @@ def normalise_to_eur(item: Item) -> Item:
 
 
 class Sniper:
-    def __init__(self, browser: BrowserManager) -> None:
+    def __init__(self, browser: BrowserManager, provider_names: list[str] | None = None) -> None:
         self.browser = browser
-        self.providers = [P(browser) for P in ALL_PROVIDERS]
+        # Explicit selection wins; otherwise fall back to the persisted set of
+        # enabled providers; otherwise all providers.
+        selection = provider_names if provider_names is not None else get_enabled_providers()
+        classes = resolve_providers(selection)
+        self.providers = [P(browser) for P in classes]
+        logger.info("providers active: %s", [p.name for p in self.providers])
         self.mpb = MpbBenchmark(browser)
         self.ebay = EbayBenchmark(browser)
         self.f64 = F64Benchmark(browser)
@@ -174,8 +181,15 @@ class Sniper:
 
         for it in new_items:
             alert = arbitrage.evaluate(
-                it, target_label=target.label, mpb=mpb, ebay=ebay, f64=f64
+                it,
+                target_label=target.label,
+                mpb=mpb,
+                ebay=ebay,
+                f64=f64,
+                price_min=target.price_min,
+                price_max=target.price_max,
             )
+            in_range = price_in_range(it.price, target.price_min, target.price_max)
             if alert:
                 delivered = True
                 if notify and not settings.dry_run:
@@ -196,9 +210,17 @@ class Sniper:
                         it.unique_key,
                     )
             else:
-                # Record even non-triggering ads so they are never re-evaluated
-                # / re-notified on subsequent runs.
-                db.record_item(it)
+                # Record every name-matched ad (even out of range / non-trigger)
+                # so the dashboard can show it and it is not re-evaluated later.
+                db.record_scan(
+                    it,
+                    target_label=target.label,
+                    alerted=False,
+                    in_range=in_range,
+                    mpb_price=mpb.value if mpb.available else None,
+                    ebay_price=ebay.value if ebay.available else None,
+                    f64_price=f64.value if f64.available else None,
+                )
         return result
 
     async def scan_all(self, db: Database) -> tuple[int, int, int]:
@@ -297,8 +319,12 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
         await notifier.send_text(cmd.HELP_TEXT)
 
     elif command.action == "list":
-        labels = list_labels()
-        body = "\n".join(f"{i+1}. {l}" for i, l in enumerate(labels)) or "(none)"
+        targets = load_targets()
+        rows = []
+        for i, t in enumerate(targets):
+            rng = range_label(t.price_min, t.price_max)
+            rows.append(f"{i+1}. {t.label}" + (f"  <code>{rng}</code>" if rng else ""))
+        body = "\n".join(rows) or "(none)"
         await notifier.send_text(f"\U0001F4CB <b>Tracked targets</b>\n{body}")
 
     elif command.action == "add":
@@ -356,6 +382,8 @@ async def amain(args: argparse.Namespace) -> int:
         logger.info("dry-run ping sent=%s", ok)
         return 0
 
+    providers = _parse_providers(getattr(args, "providers", None))
+
     db = Database()
     run_id = db.start_run()
     scanned = new_ads = alerts = 0
@@ -370,7 +398,7 @@ async def amain(args: argparse.Namespace) -> int:
                 logger.info("listen: no commands")
             elif _needs_browser(pending):
                 async with BrowserManager() as browser:
-                    sniper = Sniper(browser)
+                    sniper = Sniper(browser, provider_names=providers)
                     for command in pending:
                         await _safe_dispatch(command, notifier, db, sniper)
             else:
@@ -378,13 +406,13 @@ async def amain(args: argparse.Namespace) -> int:
                     await _safe_dispatch(command, notifier, db, None)
         elif args.query:
             async with BrowserManager() as browser:
-                sniper = Sniper(browser)
+                sniper = Sniper(browser, provider_names=providers)
                 result = await sniper.scan_query(args.query, db)
                 scanned, new_ads, alerts = result.scanned, result.new_ads, len(result.alerts)
                 await notifier.send_text(_render_adhoc_reply(result))
         else:
             async with BrowserManager() as browser:
-                sniper = Sniper(browser)
+                sniper = Sniper(browser, provider_names=providers)
                 scanned, new_ads, alerts = await sniper.scan_all(db)
                 if args.summary and not settings.dry_run:
                     await notifier.send_summary(scanned=scanned, new_ads=new_ads, alerts=alerts)
@@ -393,6 +421,14 @@ async def amain(args: argparse.Namespace) -> int:
         logger.info("run done | scanned=%d new=%d alerts=%d | %s", scanned, new_ads, alerts, db.stats())
         db.close()
     return 0
+
+
+def _parse_providers(raw: str | None) -> list[str] | None:
+    """Parse a comma/space-separated provider list from the CLI (None = default)."""
+    if not raw:
+        return None
+    names = [p.strip().lower() for p in raw.replace(",", " ").split() if p.strip()]
+    return names or None
 
 
 async def _safe_dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Database, sniper: "Sniper | None") -> None:
@@ -409,6 +445,11 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="send a run summary to Telegram")
     parser.add_argument("--listen", action="store_true", help="process pending Telegram commands")
     parser.add_argument("--query", metavar="Q", help="run a one-off scan for a single query")
+    parser.add_argument(
+        "--providers",
+        metavar="LIST",
+        help="comma/space-separated provider names to use (default: enabled set / all)",
+    )
     args = parser.parse_args()
     try:
         return asyncio.run(amain(args))
