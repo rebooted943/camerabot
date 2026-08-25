@@ -177,13 +177,32 @@ Because scans run in GitHub Actions and commit `seen_ads.db` + `thresholds.json`
 back to the repo, `git pull` to refresh the dashboard with the latest results,
 and commit after editing targets so the next scheduled scan picks them up.
 
-### Online (GitHub Pages)
+### Online — fully interactive (hosted, recommended)
 
-The same SPA is published **read-only** to GitHub Pages by `.github/workflows/pages.yml`:
-after each scan it exports a `data.json` snapshot from `seen_ads.db` +
-`thresholds.json` and deploys the site, so results are viewable from anywhere
-with no backend. The page auto-detects it has no API and hides the write/scan
-controls. Enable it once under **Settings → Pages → Source: GitHub Actions**.
+Deploy the backend as a small always-on service to get the **complete dashboard
+online** (add/remove searches, price windows, source selection, and **Scan now
+with filters**), protected by a shared token. One container serves the API + SPA
+and runs scans in-process (button + optional `SCAN_INTERVAL_MIN` scheduler),
+with state on a persistent volume.
+
+```bash
+docker build -t arbitragesniper .
+docker run -d -p 8000:8000 -v sniper_data:/data \
+  -e DASHBOARD_TOKEN=your-secret -e SCAN_INTERVAL_MIN=30 \
+  -e TELEGRAM_TOKEN=... -e TELEGRAM_CHAT_ID=... arbitragesniper
+```
+
+One-click blueprints for Render (`render.yaml`) and Fly.io (`fly.toml`) are
+included. Full guide: [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+### Online — read-only (GitHub Pages)
+
+If you only need to *view* results online for free, the same SPA is published
+**read-only** to GitHub Pages by `.github/workflows/pages.yml`: after each scan
+it exports a `data.json` snapshot and deploys the site. The page auto-detects it
+has no API and hides the write/scan controls. Enable it once under
+**Settings → Pages → Source: GitHub Actions** (see
+[`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md)).
 
 To scan on demand *from GitHub* (no local machine), use **Actions → ArbitrageSniper
 → Run workflow**, optionally passing a `query` and/or `providers`
@@ -279,6 +298,10 @@ optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
 
 ## Docs
 
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — host the always-on, fully interactive
+  dashboard online (Docker / Render / Fly), with token auth + scan scheduler.
+- [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md) — the free read-only online
+  viewer; enable Pages and fix the `main is not allowed to deploy` error.
 - [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — ready-to-use prompt
   to hand an AI agent so it builds a cross-platform mobile app with full feature
   parity (plus native push, watchlist, price history, offline, auth).
