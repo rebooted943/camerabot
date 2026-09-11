@@ -15,8 +15,41 @@ except Exception:  # pragma: no cover - dotenv is optional at runtime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = PROJECT_ROOT / "seen_ads.db"
-THRESHOLDS_PATH = PROJECT_ROOT / "thresholds.json"
+
+# State locations are env-overridable so the same code runs from the repo
+# checkout (GitHub Actions) or from a persistent volume on a hosted deployment.
+#   DATA_DIR        -> base dir for both files (default: repo root)
+#   DB_PATH         -> explicit override for the SQLite file
+#   THRESHOLDS_PATH -> explicit override for the config file
+DATA_DIR = Path(os.getenv("DATA_DIR", str(PROJECT_ROOT)))
+DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "seen_ads.db")))
+THRESHOLDS_PATH = Path(os.getenv("THRESHOLDS_PATH", str(DATA_DIR / "thresholds.json")))
+
+# The version bundled in the repo, used to seed a fresh volume on first boot.
+_BUNDLED_THRESHOLDS = PROJECT_ROOT / "thresholds.json"
+
+
+def ensure_data_files() -> None:
+    """Make sure DATA_DIR exists and thresholds.json is present.
+
+    On a hosted deployment DATA_DIR is an empty persistent volume, so seed it
+    from the repo's committed thresholds.json (or a minimal template).
+    """
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    if THRESHOLDS_PATH.exists():
+        return
+    try:
+        if _BUNDLED_THRESHOLDS.exists() and _BUNDLED_THRESHOLDS != THRESHOLDS_PATH:
+            THRESHOLDS_PATH.write_text(
+                _BUNDLED_THRESHOLDS.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        else:
+            THRESHOLDS_PATH.write_text('{\n  "targets": []\n}\n', encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -76,6 +109,17 @@ class Settings:
 
     # Telegram command listener (poll getUpdates once per --listen run).
     command_poll_timeout: int = field(default_factory=lambda: _int("COMMAND_POLL_TIMEOUT", 0))
+
+    # --- hosted dashboard (web) options ---
+    # Shared token protecting the /api/* endpoints. Empty => API is open (local).
+    dashboard_token: str = field(default_factory=lambda: os.getenv("DASHBOARD_TOKEN", ""))
+    # Built-in periodic scan interval (minutes) for the always-on server.
+    # 0 disables it (default): rely on the "Scan now" button or GitHub Actions.
+    scan_interval_min: int = field(default_factory=lambda: _int("SCAN_INTERVAL_MIN", 0))
+
+    @property
+    def auth_required(self) -> bool:
+        return bool(self.dashboard_token)
 
     @property
     def is_ci(self) -> bool:

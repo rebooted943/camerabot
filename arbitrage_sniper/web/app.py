@@ -10,15 +10,17 @@ GitHub Action keeps scanning and committing those files independently.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import settings
+from ..config import ensure_data_files, settings
 from ..database import Database
 from ..providers import ALL_PROVIDERS
 from ..targets import (
@@ -33,9 +35,73 @@ from ..targets import (
 )
 from .scan_runner import runner
 
+logger = logging.getLogger("arbitrage_sniper.web")
+
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="ArbitrageSniper", version="1.0.0")
+
+async def _scheduler_loop(interval_min: int) -> None:
+    """Periodically run a full scan on the always-on server (single-flight)."""
+    await asyncio.sleep(20)  # let the server finish booting first
+    while True:
+        try:
+            if not runner.running:
+                logger.info("scheduler: starting periodic scan")
+                runner.start(mode="all")
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("scheduler tick failed")
+        await asyncio.sleep(max(60, interval_min * 60))
+
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def lifespan(app: "FastAPI"):
+    ensure_data_files()
+    task = None
+    if settings.scan_interval_min > 0:
+        task = asyncio.create_task(_scheduler_loop(settings.scan_interval_min))
+        logger.info("scheduler enabled: every %d min", settings.scan_interval_min)
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+
+
+app = FastAPI(title="ArbitrageSniper", version="1.0.0", lifespan=lifespan)
+
+# Endpoints reachable without a token (the SPA shell + the auth probe).
+_PUBLIC_API = {"/api/health"}
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Guard /api/* with a shared token when DASHBOARD_TOKEN is configured.
+
+    Static assets (the SPA shell) stay public — they contain no secrets — so the
+    browser can load the login screen; every data call requires the token.
+    """
+    path = request.url.path
+    if settings.auth_required and path.startswith("/api/") and path not in _PUBLIC_API:
+        provided = request.headers.get("x-auth-token")
+        auth = request.headers.get("authorization", "")
+        if not provided and auth.lower().startswith("bearer "):
+            provided = auth[7:]
+        if provided != settings.dashboard_token:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {
+        "ok": True,
+        "auth_required": settings.auth_required,
+        "scheduler_min": settings.scan_interval_min,
+        "version": app.version,
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -8,6 +8,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
 </head>
 <body>
+  <div id="login" class="login-overlay hidden">
+    <form id="login-form" class="login-card">
+      <span class="logo">🎯</span>
+      <h2>ArbitrageSniper</h2>
+      <p class="hint">This dashboard is protected. Enter the access token.</p>
+      <input id="login-token" type="password" placeholder="Access token" autocomplete="current-password" />
+      <button type="submit" class="btn primary">Unlock</button>
+      <p id="login-error" class="login-error hidden">Invalid token — try again.</p>
+    </form>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <span class="logo">🎯</span>
