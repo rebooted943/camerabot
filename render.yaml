@@ -1,0 +1,32 @@
+# Render.com Blueprint — deploy the always-on dashboard from this GitHub repo.
+# Create a new Blueprint in Render pointed at the repo; it reads this file.
+# NOTE: a persistent disk requires a paid instance type on Render.
+services:
+  - type: web
+    name: arbitragesniper
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: HEADLESS
+        value: "true"
+      # Built-in periodic scan (minutes). 0 = only manual "Scan now".
+      - key: SCAN_INTERVAL_MIN
+        value: "30"
+      # Set these in the Render dashboard (marked secret).
+      - key: DASHBOARD_TOKEN
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: EBAY_APP_TOKEN
+        sync: false

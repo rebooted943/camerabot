@@ -1,0 +1,16 @@
+.git
+.github
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.env
+tests/
+docs/
+site/
+*.log
+.DS_Store
+# The hosted app keeps its own DB on the /data volume; don't bake the repo one in.
+seen_ads.db

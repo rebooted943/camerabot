@@ -12,11 +12,23 @@ const state = {
 let MODE = "live";
 let SNAPSHOT = null; // static payload
 
+const TOKEN_KEY = "as_token";
+const getToken = () => localStorage.getItem(TOKEN_KEY) || "";
+const setToken = (t) => t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY);
+
 // --------------------------------------------------------------------------- //
 // helpers
 // --------------------------------------------------------------------------- //
 async function api(path, options = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const tok = getToken();
+  if (tok) headers["X-Auth-Token"] = tok;
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401) {
+    setToken("");
+    showLogin(true);
+    throw new Error("unauthorized");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch (_) {}
@@ -327,23 +339,56 @@ async function refreshLive() {
   await Promise.all([loadStats(), loadFilters(), loadTargets(), loadProviders(), loadItems()]);
 }
 
-async function boot() {
+function showLogin(show) {
+  $("#login").classList.toggle("hidden", !show);
+  if (show) { $("#login-error").classList.add("hidden"); setTimeout(() => $("#login-token").focus(), 50); }
+}
+
+$("#login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const tok = $("#login-token").value.trim();
+  if (!tok) return;
+  setToken(tok);
   try {
-    await api("/api/stats");
-    MODE = "live";
-    await refreshLive();
-    // resume any scan already in progress
-    try { const s = await api("/api/scan"); if (s.state === "running") { $("#scan-now").disabled = true; pollScan(); } } catch (_) {}
-    setInterval(() => { if (MODE === "live") { loadStats(); loadItems(); } }, 30000);
+    await api("/api/stats");        // validates the token
+    showLogin(false);
+    $("#login-token").value = "";
+    await startLive();
   } catch (_) {
-    // No backend -> try the static snapshot (GitHub Pages).
+    setToken("");
+    $("#login-error").classList.remove("hidden");
+  }
+});
+
+async function startLive() {
+  MODE = "live";
+  await refreshLive();
+  try { const s = await api("/api/scan"); if (s.state === "running") { $("#scan-now").disabled = true; pollScan(); } } catch (_) {}
+  if (!window._liveTimer) window._liveTimer = setInterval(() => { if (MODE === "live") { loadStats(); loadItems(); } }, 30000);
+}
+
+async function boot() {
+  // 1) Is there a live backend?
+  let health = null;
+  try { health = await (await fetch("/api/health", { cache: "no-store" })).json(); } catch (_) {}
+
+  if (health && health.ok) {
+    if (health.auth_required && !getToken()) { showLogin(true); return; }
     try {
-      const res = await fetch("data.json", { cache: "no-store" });
-      if (!res.ok) throw new Error("no data");
-      enterStaticMode(await res.json());
+      await startLive();
+      return;
     } catch (e) {
-      $("#items").innerHTML = `<p class="hint">No backend and no data.json found.</p>`;
+      if (String(e.message) === "unauthorized") { showLogin(true); return; }
     }
+  }
+
+  // 2) No backend -> static snapshot (GitHub Pages).
+  try {
+    const res = await fetch("data.json", { cache: "no-store" });
+    if (!res.ok) throw new Error("no data");
+    enterStaticMode(await res.json());
+  } catch (e) {
+    $("#items").innerHTML = `<p class="hint">No backend and no data.json found.</p>`;
   }
 }
 
