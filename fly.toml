@@ -1,0 +1,32 @@
+# Fly.io config — deploy the always-on dashboard.
+#   fly launch --no-deploy      (creates the app; keep this file)
+#   fly volumes create as_data --size 1
+#   fly secrets set DASHBOARD_TOKEN=... TELEGRAM_TOKEN=... TELEGRAM_CHAT_ID=...
+#   fly deploy
+app = "arbitragesniper"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+  HEADLESS = "true"
+  PORT = "8000"
+  SCAN_INTERVAL_MIN = "30"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Keep it always-on so scheduled scans and the API stay available.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "as_data"
+  destination = "/data"
+
+[[vm]]
+  memory = "1gb"
+  cpus = 1
