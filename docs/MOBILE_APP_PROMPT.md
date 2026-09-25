@@ -6,6 +6,10 @@
 >
 > This document is the *spec/prompt* only — it does not change the running
 > system. Keep it in sync if the backend API evolves.
+>
+> For a **native Android-only** app (manual scan or a user-set server-side
+> frequency, saved listings, scraping kept on the Python worker), use
+> [`ANDROID_APP_PROMPT.md`](ANDROID_APP_PROMPT.md) instead of this prompt.
 
 ---
 

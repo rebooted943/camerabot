@@ -279,9 +279,13 @@ optional `EBAY_APP_TOKEN`). Both workflows are pinned to `ubuntu-22.04` because
 
 ## Docs
 
-- [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — ready-to-use prompt
-  to hand an AI agent so it builds a cross-platform mobile app with full feature
-  parity (plus native push, watchlist, price history, offline, auth).
+- [`docs/ANDROID_APP_PROMPT.md`](docs/ANDROID_APP_PROMPT.md) — prompt da incollare
+  a un agente per l’app **Android nativa** (Kotlin + Compose): interfaccia,
+  annunci salvati, scan manuale o frequenza impostabile. Lo scraping resta sul
+  worker Python; il telefono non scrapa.
+- [`docs/MOBILE_APP_PROMPT.md`](docs/MOBILE_APP_PROMPT.md) — prompt alternativo
+  cross-platform (React Native / Expo) con parità funzionale, push, watchlist,
+  storico prezzi, offline e auth.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — future development plan, including how
   to generalize the engine beyond photography into other resale verticals
   (electronics, watches, sneakers, bikes, …).
