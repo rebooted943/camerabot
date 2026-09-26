@@ -58,7 +58,8 @@ sequenced by effort/impact rather than dates.
 
 ### Theme D — Notifications & UX
 *Touches:* `notifier.py`, web, mobile.
-- The mobile app (see `MOBILE_APP_PROMPT.md`) with native push.
+- The mobile app (see `MOBILE_APP_PROMPT.md` for cross-platform, or
+  `ANDROID_APP_PROMPT.md` for native Android with a server-side schedule).
 - Digestible summaries, per-target mute/threshold, and "why this alerted".
 - One-tap actions (dismiss, watch, mark bought) that feed back into ranking.
 
