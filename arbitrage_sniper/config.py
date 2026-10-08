@@ -46,6 +46,9 @@ class Settings:
 
     telegram_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_TOKEN", ""))
     telegram_chat_id: str = field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID", ""))
+    # xAI key for `python main.py --grok`. The scheduled scanner does not need it.
+    xai_api_key: str = field(default_factory=lambda: os.getenv("XAI_API_KEY", ""))
+    xai_model: str = field(default_factory=lambda: os.getenv("XAI_MODEL", "grok-4.7"))
     ebay_app_token: str = field(default_factory=lambda: os.getenv("EBAY_APP_TOKEN", ""))
     # Playwright cookies JSON for Facebook Marketplace (optional but recommended).
     facebook_cookies_path: str = field(default_factory=lambda: os.getenv("FACEBOOK_COOKIES_PATH", ""))
