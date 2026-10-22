@@ -18,3 +18,6 @@ tenacity==8.3.0
 # Web dashboard (local UI to manage targets and browse scanned items)
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
+
+# Grok bot (`python main.py --grok`). The scanner itself does not import this.
+xai-sdk==1.20.0
