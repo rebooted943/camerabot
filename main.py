@@ -374,6 +374,11 @@ async def _dispatch(command: cmd.Command, notifier: TelegramNotifier, db: Databa
 # entrypoints
 # --------------------------------------------------------------------------- #
 async def amain(args: argparse.Namespace) -> int:
+    if getattr(args, "grok", None) is not None:
+        from arbitrage_sniper.grok_bot import run as run_grok
+
+        return await run_grok(args.grok or None)
+
     for p in settings.validate():
         logger.warning("config: %s", p)
 
@@ -445,6 +450,14 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="send a run summary to Telegram")
     parser.add_argument("--listen", action="store_true", help="process pending Telegram commands")
     parser.add_argument("--query", metavar="Q", help="run a one-off scan for a single query")
+    parser.add_argument(
+        "--grok",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="MSG",
+        help="chat with the Grok bot (Vinted+OLX, Fujifilm only). Omit MSG for an interactive prompt.",
+    )
     parser.add_argument(
         "--providers",
         metavar="LIST",
