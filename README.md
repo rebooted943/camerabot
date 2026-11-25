@@ -80,6 +80,7 @@ and `a7` never matches `a7r`.
     ├── database.py                  # SQLite manager (seen_ads + run_log + bot_state)
     ├── arbitrage.py                 # core trigger + spread calculation (pure)
     ├── notifier.py                  # Telegram HTML notifier + getUpdates
+    ├── grok_bot.py                  # Grok chat: Vinted + OLX, Fujifilm only
     ├── web/                         # dashboard (FastAPI + vanilla-JS SPA)
     │   ├── app.py                   # REST API: targets CRUD, items, providers, scan
     │   ├── scan_runner.py           # background "Scan now" runner
@@ -256,6 +257,25 @@ category in Telegram you can route each target to its own channel or to a
 - A target may also set `chat_id`/`topic_id` directly instead of using a named channel.
 - Discover both ids with `scripts/get_chat_id.py` (it prints chat ids and any
   forum topic ids it sees).
+
+## Grok bot
+
+A separate chat entrypoint. It answers in Italian and can search **only Vinted and
+OLX**, and **only** Fujifilm mirrorless bodies (X and GFX) plus lenses for the
+Fuji X or GFX mount — Fujinon and third-party (Sigma, Viltrox, Tamron, …).
+Other marketplaces and other brands are rejected in code, before any browser
+opens. The model picks the query; `search_listings` runs the existing scrapers.
+
+```bash
+export XAI_API_KEY=...          # from console.x.ai
+export VINTED_MARKETS=it,ro     # optional; default scans every EU Vinted site
+python main.py --grok                              # interactive
+python main.py --grok "Fujifilm X-T5 su Vinted"    # one shot
+python -m arbitrage_sniper.grok_bot X-T5 su OLX    # words don't need quotes
+```
+
+Chromium must be installed (`python -m playwright install chromium`). The
+scheduled GitHub Action does not call this bot and does not need `XAI_API_KEY`.
 
 ## Run a single query locally
 
